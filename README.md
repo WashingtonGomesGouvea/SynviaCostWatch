@@ -48,26 +48,30 @@ SynviaCostWatch/
  ├─ app.py                        # Código principal em Streamlit
  ├─ requirements.txt              # Dependências
  └─ README.md                     # Documentação do projeto
- 
-Como Usar
-Gerenciar Fornecedores
+ ```
+## Como Usar:
+
+### Gerenciar Fornecedores
 
 Adicionar novo fornecedor (gera nova aba no Excel).
 Editar informações gerais (nome, CNPJ, contato etc.).
 Inserir/remover linhas de produtos/serviços.
 Excluir fornecedor, removendo a aba correspondente.
-Lista de Fornecedores
+
+## Lista de Fornecedores
 
 Visualiza todas as abas (fornecedores) em uma única tabela.
 Permite filtrar e analisar dados de forma centralizada.
-Observações
+
+## Observações
 Se o arquivo no SharePoint estiver aberto por outra pessoa, você pode receber um erro 423 Locked. Nesse caso, feche o arquivo ou faça check-in antes de salvar.
 Se “Documentos Compartilhados” não funcionar, tente “Shared Documents” (depende do nome interno da biblioteca).
 Mantenha as credenciais fora do repositório público, usando .gitignore.
-Como Contribuir
+
+## Como Contribuir
 Contribuições são bem-vindas! Sinta-se à vontade para abrir um issue ou enviar um pull request com melhorias, correções ou novas funcionalidades. 💖
 
-Licença
+## Licença
 Este projeto não possui uma licença específica definida. Caso deseje, adicione um arquivo LICENSE para definir os termos de uso e distribuição.
 
 Feito com 💼 + ☕ por Washington Gomes

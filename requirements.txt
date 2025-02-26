@@ -1,3 +1,4 @@
 Office365_REST_Python_Client==2.5.14
 pandas==2.2.3
 streamlit==1.39.0
+openpyxl==3.1.5

@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import datetime
 from io import BytesIO
+import random
+import re
 
 # Biblioteca para conexão com SharePoint
 from office365.sharepoint.client_context import ClientContext
@@ -11,7 +13,6 @@ from office365.runtime.auth.user_credential import UserCredential
 # -------------------------------------------------------------
 # 1) CREDENCIAIS E CAMINHO DO SHAREPOINT (via st.secrets)
 # -------------------------------------------------------------
-# (IMPORTANTE) Pegamos as variáveis do arquivo secrets.toml
 EMAIL_REMETENTE = st.secrets["sharepoint"]["email"]
 SENHA_EMAIL = st.secrets["sharepoint"]["password"]
 SITE_URL = st.secrets["sharepoint"]["site_url"]
@@ -61,7 +62,6 @@ def parse_float_br(value):
     Ajuste conforme seu Excel.
     """
     if isinstance(value, str):
-        # Remove "R$", pontos de milhar e converte vírgula decimal para ponto
         value = value.replace("R$", "").replace(".", "").replace(",", ".").strip()
         try:
             return float(value)
@@ -70,13 +70,34 @@ def parse_float_br(value):
     return value
 
 # -------------------------------------------------------------
+# 3.1) FUNÇÕES PARA GERAR ID AUTOMÁTICO
+# -------------------------------------------------------------
+def generate_id_fornecedor(supplier_name):
+    """
+    Gera um ID automático, pegando as 3 primeiras letras do nome (limpas) + número aleatório.
+    Ex: 'Synvia' -> 'SYN123'
+    """
+    if not supplier_name:
+        return ""
+    prefix = re.sub(r"[^A-Za-z]", "", supplier_name).upper()[:3]
+    rand_num = random.randint(100, 999)
+    return f"{prefix}{rand_num}"
+
+def generate_id_produto(produto_name):
+    """
+    Gera um ID automático para o produto, começando com 'P' + 3 letras do nome + número aleatório.
+    Ex: 'Internet Link' -> 'PINT456'
+    """
+    if not produto_name:
+        return ""
+    prefix = re.sub(r"[^A-Za-z]", "", produto_name).upper()[:3]
+    rand_num = random.randint(100, 999)
+    return f"P{prefix}{rand_num}"   # <-- agora inicia com "P"
+
+# -------------------------------------------------------------
 # 4) CARREGAR DADOS DO SHAREPOINT
 # -------------------------------------------------------------
 def load_data():
-    """
-    Lê o arquivo Excel do SharePoint, ignora as abas 'MATRIZ' e 'MODELO',
-    garante as colunas e converte datas e valores.
-    """
     try:
         ctx = ClientContext(SITE_URL).with_credentials(
             UserCredential(EMAIL_REMETENTE, SENHA_EMAIL)
@@ -94,22 +115,13 @@ def load_data():
 
         # Ajusta cada aba
         for sheet_name, df in filtered_sheets.items():
-            # Garante a existência de todas as colunas
             for col in ALL_COLUMNS:
                 if col not in df.columns:
                     df[col] = ""
 
-            # Converte datas
-            if "Inicio do contrato" in df.columns:
-                df["Inicio do contrato"] = pd.to_datetime(
-                    df["Inicio do contrato"], errors="coerce", dayfirst=True
-                )
-            if "Termino do contrato" in df.columns:
-                df["Termino do contrato"] = pd.to_datetime(
-                    df["Termino do contrato"], errors="coerce", dayfirst=True
-                )
-
-            # Converte valores monetários
+            # Se estiver em texto no Excel, tudo bem; se estiver em datetime,
+            # não vamos converter, pois agora queremos strings.
+            # (Mas se quiser converter datas antigas para string, pode fazer aqui.)
             if "Valor mensal" in df.columns:
                 df["Valor mensal"] = df["Valor mensal"].apply(parse_float_br)
             if "Valor do plano" in df.columns:
@@ -127,11 +139,28 @@ def load_data():
 # 5) SALVAR DADOS DE VOLTA NO SHAREPOINT
 # -------------------------------------------------------------
 def save_data():
-    """
-    Salva cada DataFrame do st.session_state em abas separadas no mesmo arquivo Excel do SharePoint.
-    Sobrescreve o arquivo.
-    """
     try:
+        # Para cada fornecedor (aba), transformamos datas em texto
+        for supplier_name, df in st.session_state.suppliers_data.items():
+
+            if "Inicio do contrato" in df.columns:
+                for i in range(len(df)):
+                    val = df.at[i, "Inicio do contrato"]
+                    # Se val for datetime ou Timestamp válido, converte; se for NaT, salva como ""
+                    if pd.isnull(val):  # Significa que é NaT ou None
+                        df.at[i, "Inicio do contrato"] = ""
+                    elif isinstance(val, (pd.Timestamp, datetime.datetime)):
+                        df.at[i, "Inicio do contrato"] = val.strftime("%d/%m/%Y")
+
+            if "Termino do contrato" in df.columns:
+                for i in range(len(df)):
+                    val = df.at[i, "Termino do contrato"]
+                    if pd.isnull(val):
+                        df.at[i, "Termino do contrato"] = ""
+                    elif isinstance(val, (pd.Timestamp, datetime.datetime)):
+                        df.at[i, "Termino do contrato"] = val.strftime("%d/%m/%Y")
+
+        # Agora gravamos no Excel
         output = BytesIO()
         with pd.ExcelWriter(output) as writer:
             for supplier_name, df in st.session_state.suppliers_data.items():
@@ -152,6 +181,7 @@ def save_data():
             )
         else:
             st.error(f"Erro ao salvar o arquivo Excel: {e}")
+
 
 # -------------------------------------------------------------
 # 6) INICIALIZA O ST.SESSION_STATE
@@ -181,12 +211,60 @@ with tabs[0]:
     if selected_supplier == "Adicionar Novo Fornecedor":
         st.subheader("Adicionar Novo Fornecedor")
 
-        new_supplier_name = st.text_input("Nome do Fornecedor")
-        new_id_fornecedor = st.text_input("ID - Fornecedor")
+        # Para não regenerar ID toda hora, guardamos nome do fornecedor e produto no session_state
+        if "supplier_name" not in st.session_state:
+            st.session_state.supplier_name = ""
+        if "product_name" not in st.session_state:
+            st.session_state.product_name = ""
+
+        # Nome do fornecedor
+        new_supplier_name = st.text_input("Nome do Fornecedor", value=st.session_state.supplier_name)
+
+        # Se o nome mudou, gera ID novamente
+        if new_supplier_name != st.session_state.supplier_name:
+            st.session_state.supplier_name = new_supplier_name
+            st.session_state.auto_id_fornecedor = generate_id_fornecedor(new_supplier_name)
+
+        # Exibe ID gerado (mas permite edição manual)
+        new_id_fornecedor = st.text_input("ID - Fornecedor (auto)",
+                                          value=st.session_state.get("auto_id_fornecedor", ""))
+
         new_cnpj = st.text_input("CNPJ")
         new_contato = st.text_input("Contato")
         new_centro_custo = st.text_input("Centro de custo")
 
+        # Descrição do Produto e ID do Produto
+        new_descricao_produto = st.text_input("Descrição do Produto", value=st.session_state.product_name)
+
+        # Se a descrição mudar, gera ID novamente
+        if new_descricao_produto != st.session_state.product_name:
+            st.session_state.product_name = new_descricao_produto
+            st.session_state.auto_id_produto = generate_id_produto(new_descricao_produto)
+
+        new_id_produto = st.text_input("ID - Produto (auto)",
+                                       value=st.session_state.get("auto_id_produto", ""))
+
+        # Status fixo
+        new_status = "ATIVO"
+
+        # Localidade com opções
+        localidades = ["PAULINIA", "AMBAS", "CAMPINAS"]
+        new_localidade = st.selectbox("Localidade", localidades)
+
+        # Metodo de pagamento
+        new_metodo_pagamento = st.selectbox("Método de Pagamento", ["BOLETO", "CARTÃO"])
+
+        # Forma de pagamento
+        forma_options = ["A Prazo", "A Vista"]
+        new_forma_pagamento = st.selectbox("Forma de pagamento", forma_options)
+
+        # Se for "A Vista" e o usuário não digitar nada, define como "1"
+        def_tempo = ""
+        if new_forma_pagamento == "A Vista":
+            def_tempo = "1"
+        new_tempo_pagamento = st.text_input("Tempo de pagamento (Parcelas)", value=def_tempo)
+
+        # Datas e valores
         new_inicio_str = st.text_input("Início do contrato (DD/MM/AAAA)", "")
         new_termino_str = st.text_input("Término do contrato (DD/MM/AAAA)", "")
         new_valor_mensal_str = st.text_input("Valor Mensal (R$)", "")
@@ -198,43 +276,58 @@ with tabs[0]:
             elif new_supplier_name in suppliers:
                 st.error("Esse fornecedor já existe.")
             else:
-                # Cria DF vazio com colunas
+                # Cria DataFrame vazio
                 new_df = pd.DataFrame(columns=ALL_COLUMNS)
 
-                # Monta dicionário com as infos
+                # Monta dicionário
                 new_row = {
                     "Fornecedor": new_supplier_name,
                     "ID - Fornecedor": new_id_fornecedor,
                     "CNPJ": new_cnpj,
                     "Contato": new_contato,
                     "Centro de custo": new_centro_custo,
+                    "Descrição do Produto": new_descricao_produto,
+                    "ID - Produto": new_id_produto,
+                    "Status": new_status,
+                    "Localidade": new_localidade,
+                    "Metodo de pagamento": new_metodo_pagamento,
+                    "Forma de pagamento": new_forma_pagamento,
+                    "Tempo de pagamento": new_tempo_pagamento,
                 }
 
-                # Converter datas
+                # Converte datas para texto dd/mm/aaaa
                 try:
                     dt_inicio = datetime.datetime.strptime(new_inicio_str, "%d/%m/%Y") if new_inicio_str else None
                 except ValueError:
                     dt_inicio = None
+                if dt_inicio:
+                    new_row["Inicio do contrato"] = dt_inicio.strftime("%d/%m/%Y")
+                else:
+                    new_row["Inicio do contrato"] = ""
+
                 try:
                     dt_termino = datetime.datetime.strptime(new_termino_str, "%d/%m/%Y") if new_termino_str else None
                 except ValueError:
                     dt_termino = None
+                if dt_termino:
+                    new_row["Termino do contrato"] = dt_termino.strftime("%d/%m/%Y")
+                else:
+                    new_row["Termino do contrato"] = ""
 
-                new_row["Inicio do contrato"] = dt_inicio
-                new_row["Termino do contrato"] = dt_termino
-
-                # Converter valores
                 new_row["Valor mensal"] = parse_float_br(new_valor_mensal_str)
                 new_row["Valor do plano"] = parse_float_br(new_valor_plano_str)
 
-                # Insere a linha no DataFrame
                 new_df.loc[len(new_df)] = new_row
 
-                # Armazena no session_state
                 st.session_state.suppliers_data[new_supplier_name] = new_df
                 st.success(f"Fornecedor '{new_supplier_name}' criado com sucesso!")
 
-                # Salva imediatamente para criar a aba no Excel
+                # Limpa session state para não regenerar IDs na próxima criação
+                st.session_state.supplier_name = ""
+                st.session_state.product_name = ""
+                st.session_state.auto_id_fornecedor = ""
+                st.session_state.auto_id_produto = ""
+
                 save_data()
                 suppliers = list(st.session_state.suppliers_data.keys())
 
@@ -262,6 +355,7 @@ with tabs[0]:
         # Configura colunas gerais como disabled no data_editor
         column_config = {col: st.column_config.Column(disabled=True) for col in GENERAL_COLUMNS}
 
+        # Mantemos a configuração de colunas para data e valores
         if "Inicio do contrato" in df_original.columns:
             column_config["Inicio do contrato"] = st.column_config.DateColumn(
                 "Início do Contrato",
@@ -283,22 +377,20 @@ with tabs[0]:
                 format="%.2f"
             )
 
-        # Exibe o data_editor
         edited_df = st.data_editor(
             df_original,
             column_config=column_config,
-            num_rows="dynamic",  # permite inserir/excluir linhas
+            num_rows="dynamic",
             key=f"{supplier}_editor"
         )
 
-        # Atualiza as colunas gerais no DataFrame editado
+        # Converte datas do editor para string (dd/mm/aaaa) ao final
+        # (Faremos isso em save_data(), mas se quiser forçar aqui, pode.)
         for col in GENERAL_COLUMNS:
             edited_df[col] = general_info[col]
 
-        # Salva no session_state
         st.session_state.suppliers_data[supplier] = edited_df
 
-        # Ações: Salvar ou Excluir Fornecedor
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Salvar", key=f"{supplier}_save"):
@@ -306,7 +398,6 @@ with tabs[0]:
 
         with col2:
             if st.button("Excluir Fornecedor", key=f"{supplier}_delete"):
-                # Remove o fornecedor do dicionário e salva
                 st.session_state.suppliers_data.pop(supplier)
                 st.success(f"Fornecedor '{supplier}' excluído com sucesso!")
                 save_data()
@@ -314,18 +405,16 @@ with tabs[0]:
                 st.stop()
 
 # -------------------------------------------------------------
-# ABA 2: LISTA DE FORNECEDORES (com todas as colunas)
+# ABA 2: LISTA DE FORNECEDORES
 # -------------------------------------------------------------
 with tabs[1]:
     st.title("Lista de Fornecedores")
 
     if suppliers:
         st.write("Exibindo todas as colunas do Excel, unificando os dados de cada aba.")
-        # Concatena todos os fornecedores em um único DataFrame
         combined_df = pd.DataFrame()
         for sup_name in suppliers:
             df_sup = st.session_state.suppliers_data[sup_name].copy()
-            # Adiciona uma coluna "Aba" para identificar o fornecedor
             df_sup.insert(0, "Aba", sup_name)
             combined_df = pd.concat([combined_df, df_sup], ignore_index=True)
 

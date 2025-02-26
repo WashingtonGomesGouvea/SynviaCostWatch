@@ -25,7 +25,7 @@ GENERAL_COLUMNS = [
     "Fornecedor",
     "ID - Fornecedor",
     "CNPJ",
-    "Contato",
+    "Contato",         # Tratar como string (padrão telefone)
     "Centro de custo",
 ]
 
@@ -98,6 +98,11 @@ def generate_id_produto(produto_name):
 # 4) CARREGAR DADOS DO SHAREPOINT
 # -------------------------------------------------------------
 def load_data():
+    """
+    Lê o arquivo Excel do SharePoint e retorna um dicionário {aba: DataFrame}.
+    Ignora abas 'MATRIZ' e 'MODELO'.
+    Converte 'CNPJ' e 'Contato' para string para evitar problemas no st.data_editor.
+    """
     try:
         ctx = ClientContext(SITE_URL).with_credentials(
             UserCredential(EMAIL_REMETENTE, SENHA_EMAIL)
@@ -115,13 +120,18 @@ def load_data():
 
         # Ajusta cada aba
         for sheet_name, df in filtered_sheets.items():
+            # Garante todas as colunas
             for col in ALL_COLUMNS:
                 if col not in df.columns:
                     df[col] = ""
 
-            # Se estiver em texto no Excel, tudo bem; se estiver em datetime,
-            # não vamos converter, pois agora queremos strings.
-            # (Mas se quiser converter datas antigas para string, pode fazer aqui.)
+            # Converte 'CNPJ' e 'Contato' em string
+            if "CNPJ" in df.columns:
+                df["CNPJ"] = df["CNPJ"].astype(str)
+            if "Contato" in df.columns:
+                df["Contato"] = df["Contato"].astype(str)
+
+            # Converte valores monetários
             if "Valor mensal" in df.columns:
                 df["Valor mensal"] = df["Valor mensal"].apply(parse_float_br)
             if "Valor do plano" in df.columns:
@@ -139,15 +149,23 @@ def load_data():
 # 5) SALVAR DADOS DE VOLTA NO SHAREPOINT
 # -------------------------------------------------------------
 def save_data():
+    """
+    Converte datas para texto (dd/mm/aaaa) antes de salvar no Excel.
+    E garante que 'CNPJ' e 'Contato' permaneçam como string.
+    """
     try:
-        # Para cada fornecedor (aba), transformamos datas em texto
         for supplier_name, df in st.session_state.suppliers_data.items():
+            # Garante que 'CNPJ' e 'Contato' são string
+            if "CNPJ" in df.columns:
+                df["CNPJ"] = df["CNPJ"].astype(str)
+            if "Contato" in df.columns:
+                df["Contato"] = df["Contato"].astype(str)
 
+            # Converte datas em texto
             if "Inicio do contrato" in df.columns:
                 for i in range(len(df)):
                     val = df.at[i, "Inicio do contrato"]
-                    # Se val for datetime ou Timestamp válido, converte; se for NaT, salva como ""
-                    if pd.isnull(val):  # Significa que é NaT ou None
+                    if pd.isnull(val):
                         df.at[i, "Inicio do contrato"] = ""
                     elif isinstance(val, (pd.Timestamp, datetime.datetime)):
                         df.at[i, "Inicio do contrato"] = val.strftime("%d/%m/%Y")
@@ -160,7 +178,6 @@ def save_data():
                     elif isinstance(val, (pd.Timestamp, datetime.datetime)):
                         df.at[i, "Termino do contrato"] = val.strftime("%d/%m/%Y")
 
-        # Agora gravamos no Excel
         output = BytesIO()
         with pd.ExcelWriter(output) as writer:
             for supplier_name, df in st.session_state.suppliers_data.items():
@@ -181,7 +198,6 @@ def save_data():
             )
         else:
             st.error(f"Erro ao salvar o arquivo Excel: {e}")
-
 
 # -------------------------------------------------------------
 # 6) INICIALIZA O ST.SESSION_STATE
@@ -207,64 +223,55 @@ with tabs[0]:
         ["Adicionar Novo Fornecedor"] + suppliers
     )
 
-    # 7.1) CRIAÇÃO DE NOVO FORNECEDOR
     if selected_supplier == "Adicionar Novo Fornecedor":
         st.subheader("Adicionar Novo Fornecedor")
 
-        # Para não regenerar ID toda hora, guardamos nome do fornecedor e produto no session_state
         if "supplier_name" not in st.session_state:
             st.session_state.supplier_name = ""
         if "product_name" not in st.session_state:
             st.session_state.product_name = ""
 
-        # Nome do fornecedor
         new_supplier_name = st.text_input("Nome do Fornecedor", value=st.session_state.supplier_name)
 
-        # Se o nome mudou, gera ID novamente
         if new_supplier_name != st.session_state.supplier_name:
             st.session_state.supplier_name = new_supplier_name
             st.session_state.auto_id_fornecedor = generate_id_fornecedor(new_supplier_name)
 
-        # Exibe ID gerado (mas permite edição manual)
-        new_id_fornecedor = st.text_input("ID - Fornecedor (auto)",
-                                          value=st.session_state.get("auto_id_fornecedor", ""))
+        new_id_fornecedor = st.text_input(
+            "ID - Fornecedor (auto)",
+            value=st.session_state.get("auto_id_fornecedor", "")
+        )
 
-        new_cnpj = st.text_input("CNPJ")
-        new_contato = st.text_input("Contato")
+        new_cnpj = st.text_input("CNPJ")  # string
+        new_contato = st.text_input("Contato")  # string
         new_centro_custo = st.text_input("Centro de custo")
 
-        # Descrição do Produto e ID do Produto
         new_descricao_produto = st.text_input("Descrição do Produto", value=st.session_state.product_name)
 
-        # Se a descrição mudar, gera ID novamente
         if new_descricao_produto != st.session_state.product_name:
             st.session_state.product_name = new_descricao_produto
             st.session_state.auto_id_produto = generate_id_produto(new_descricao_produto)
 
-        new_id_produto = st.text_input("ID - Produto (auto)",
-                                       value=st.session_state.get("auto_id_produto", ""))
+        new_id_produto = st.text_input(
+            "ID - Produto (auto)",
+            value=st.session_state.get("auto_id_produto", "")
+        )
 
-        # Status fixo
         new_status = "ATIVO"
 
-        # Localidade com opções
         localidades = ["PAULINIA", "AMBAS", "CAMPINAS"]
         new_localidade = st.selectbox("Localidade", localidades)
 
-        # Metodo de pagamento
         new_metodo_pagamento = st.selectbox("Método de Pagamento", ["BOLETO", "CARTÃO"])
 
-        # Forma de pagamento
         forma_options = ["A Prazo", "A Vista"]
         new_forma_pagamento = st.selectbox("Forma de pagamento", forma_options)
 
-        # Se for "A Vista" e o usuário não digitar nada, define como "1"
         def_tempo = ""
         if new_forma_pagamento == "A Vista":
             def_tempo = "1"
         new_tempo_pagamento = st.text_input("Tempo de pagamento (Parcelas)", value=def_tempo)
 
-        # Datas e valores
         new_inicio_str = st.text_input("Início do contrato (DD/MM/AAAA)", "")
         new_termino_str = st.text_input("Término do contrato (DD/MM/AAAA)", "")
         new_valor_mensal_str = st.text_input("Valor Mensal (R$)", "")
@@ -276,10 +283,8 @@ with tabs[0]:
             elif new_supplier_name in suppliers:
                 st.error("Esse fornecedor já existe.")
             else:
-                # Cria DataFrame vazio
                 new_df = pd.DataFrame(columns=ALL_COLUMNS)
 
-                # Monta dicionário
                 new_row = {
                     "Fornecedor": new_supplier_name,
                     "ID - Fornecedor": new_id_fornecedor,
@@ -295,7 +300,6 @@ with tabs[0]:
                     "Tempo de pagamento": new_tempo_pagamento,
                 }
 
-                # Converte datas para texto dd/mm/aaaa
                 try:
                     dt_inicio = datetime.datetime.strptime(new_inicio_str, "%d/%m/%Y") if new_inicio_str else None
                 except ValueError:
@@ -322,7 +326,6 @@ with tabs[0]:
                 st.session_state.suppliers_data[new_supplier_name] = new_df
                 st.success(f"Fornecedor '{new_supplier_name}' criado com sucesso!")
 
-                # Limpa session state para não regenerar IDs na próxima criação
                 st.session_state.supplier_name = ""
                 st.session_state.product_name = ""
                 st.session_state.auto_id_fornecedor = ""
@@ -331,7 +334,6 @@ with tabs[0]:
                 save_data()
                 suppliers = list(st.session_state.suppliers_data.keys())
 
-    # 7.2) EDIÇÃO DE FORNECEDOR EXISTENTE
     else:
         supplier = selected_supplier
         df_original = st.session_state.suppliers_data[supplier].copy()
@@ -352,20 +354,19 @@ with tabs[0]:
         st.subheader("Produtos/Serviços")
         st.caption("Para inserir ou excluir linhas, use o '+' ou a lixeira no `st.data_editor`.")
 
-        # Configura colunas gerais como disabled no data_editor
         column_config = {col: st.column_config.Column(disabled=True) for col in GENERAL_COLUMNS}
 
-        # Mantemos a configuração de colunas para data e valores
+        # Usamos TextColumn para datas e CNPJ/Contato
         if "Inicio do contrato" in df_original.columns:
-            column_config["Inicio do contrato"] = st.column_config.DateColumn(
-                "Início do Contrato",
-                format="DD/MM/YYYY"
-            )
+            column_config["Inicio do contrato"] = st.column_config.TextColumn("Início do Contrato")
         if "Termino do contrato" in df_original.columns:
-            column_config["Termino do contrato"] = st.column_config.DateColumn(
-                "Término do Contrato",
-                format="DD/MM/YYYY"
-            )
+            column_config["Termino do contrato"] = st.column_config.TextColumn("Término do Contrato")
+        if "CNPJ" in df_original.columns:
+            column_config["CNPJ"] = st.column_config.TextColumn("CNPJ")
+        if "Contato" in df_original.columns:
+            column_config["Contato"] = st.column_config.TextColumn("Contato")
+
+        # Mantemos NumberColumn para valores
         if "Valor mensal" in df_original.columns:
             column_config["Valor mensal"] = st.column_config.NumberColumn(
                 "Valor Mensal",
@@ -384,8 +385,6 @@ with tabs[0]:
             key=f"{supplier}_editor"
         )
 
-        # Converte datas do editor para string (dd/mm/aaaa) ao final
-        # (Faremos isso em save_data(), mas se quiser forçar aqui, pode.)
         for col in GENERAL_COLUMNS:
             edited_df[col] = general_info[col]
 

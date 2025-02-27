@@ -24,8 +24,8 @@ FILE_URL = st.secrets["sharepoint"]["file_url"]
 GENERAL_COLUMNS = [
     "Fornecedor",
     "ID - Fornecedor",
-    "CNPJ",
-    "Contato",         # Tratar como string (padrão telefone)
+    "CNPJ",            # Mantemos como string
+    "Contato",         # Também string (padrão telefone)
     "Centro de custo",
 ]
 
@@ -92,7 +92,7 @@ def generate_id_produto(produto_name):
         return ""
     prefix = re.sub(r"[^A-Za-z]", "", produto_name).upper()[:3]
     rand_num = random.randint(100, 999)
-    return f"P{prefix}{rand_num}"   # <-- agora inicia com "P"
+    return f"P{prefix}{rand_num}"
 
 # -------------------------------------------------------------
 # 4) CARREGAR DADOS DO SHAREPOINT
@@ -243,7 +243,7 @@ with tabs[0]:
         )
 
         new_cnpj = st.text_input("CNPJ")  # string
-        new_contato = st.text_input("Contato")  # string
+        new_contato = st.text_input("Contato (ex: (12) 982896323)")  # string
         new_centro_custo = st.text_input("Centro de custo")
 
         new_descricao_produto = st.text_input("Descrição do Produto", value=st.session_state.product_name)
@@ -408,6 +408,28 @@ with tabs[0]:
 # -------------------------------------------------------------
 with tabs[1]:
     st.title("Lista de Fornecedores")
+
+    # Link para Power BI
+    st.write("### Dashboard no Power BI")
+    st.markdown(
+        "[Clique aqui para visualizar o relatório Power BI](https://app.powerbi.com/reportEmbed?reportId=cf2f800d-cf4a-4cb7-b871-99e583f70aa8&autoAuth=true&ctid=fee1b506-24b6-444a-919e-83df9442dc5d)",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        """
+        <iframe title="Análise de Custos" width="1140" height="541.25"
+                src="https://app.powerbi.com/reportEmbed?reportId=cf2f800d-cf4a-4cb7-b871-99e583f70aa8&autoAuth=true&ctid=fee1b506-24b6-444a-919e-83df9442dc5d"
+                frameborder="0" allowFullScreen="true"></iframe>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Link para pasta com arquivos-fonte
+    st.write("### Pasta SharePoint com arquivos-fonte")
+    st.markdown(
+        "[Acesse aqui a pasta no SharePoint](https://synviagroup.sharepoint.com/:f:/r/sites/gestaodeprodutos/Documentos%20Compartilhados/Gest%C3%A3o%20financeira?csf=1&web=1&e=vHmqxV)",
+        unsafe_allow_html=True
+    )
 
     if suppliers:
         st.write("Exibindo todas as colunas do Excel, unificando os dados de cada aba.")

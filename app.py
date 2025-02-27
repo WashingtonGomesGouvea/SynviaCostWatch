@@ -101,7 +101,7 @@ def load_data():
     """
     Lê o arquivo Excel do SharePoint e retorna um dicionário {aba: DataFrame}.
     Ignora abas 'MATRIZ' e 'MODELO'.
-    Converte 'CNPJ' e 'Contato' para string para evitar problemas no st.data_editor.
+    Converte 'CNPJ', 'Contato' e colunas de data para string para evitar problemas no st.data_editor.
     """
     try:
         ctx = ClientContext(SITE_URL).with_credentials(
@@ -118,7 +118,6 @@ def load_data():
             if name not in ["MATRIZ", "MODELO"]
         }
 
-        # Ajusta cada aba
         for sheet_name, df in filtered_sheets.items():
             # Garante todas as colunas
             for col in ALL_COLUMNS:
@@ -130,6 +129,12 @@ def load_data():
                 df["CNPJ"] = df["CNPJ"].astype(str)
             if "Contato" in df.columns:
                 df["Contato"] = df["Contato"].astype(str)
+
+            # Se "Inicio do contrato" / "Termino do contrato" vier como datetime, converte para string "DD/MM/AAAA"
+            if "Inicio do contrato" in df.columns:
+                df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
+            if "Termino do contrato" in df.columns:
+                df["Termino do contrato"] = df["Termino do contrato"].apply(_datetime_to_str)
 
             # Converte valores monetários
             if "Valor mensal" in df.columns:
@@ -145,13 +150,25 @@ def load_data():
         st.error(f"Erro ao carregar o arquivo Excel: {e}")
         return {}
 
+def _datetime_to_str(val):
+    """
+    Converte um valor datetime para string no formato DD/MM/AAAA.
+    Se for NaT, retorna "".
+    Se já for string, retorna como está.
+    """
+    if pd.isnull(val):
+        return ""
+    if isinstance(val, (pd.Timestamp, datetime.datetime)):
+        return val.strftime("%d/%m/%Y")
+    return str(val)  # Se já for string, ou outro tipo
+
 # -------------------------------------------------------------
 # 5) SALVAR DADOS DE VOLTA NO SHAREPOINT
 # -------------------------------------------------------------
 def save_data():
     """
     Converte datas para texto (dd/mm/aaaa) antes de salvar no Excel.
-    E garante que 'CNPJ' e 'Contato' permaneçam como string.
+    Garante que 'CNPJ' e 'Contato' permaneçam como string.
     """
     try:
         for supplier_name, df in st.session_state.suppliers_data.items():
@@ -163,20 +180,9 @@ def save_data():
 
             # Converte datas em texto
             if "Inicio do contrato" in df.columns:
-                for i in range(len(df)):
-                    val = df.at[i, "Inicio do contrato"]
-                    if pd.isnull(val):
-                        df.at[i, "Inicio do contrato"] = ""
-                    elif isinstance(val, (pd.Timestamp, datetime.datetime)):
-                        df.at[i, "Inicio do contrato"] = val.strftime("%d/%m/%Y")
-
+                df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
             if "Termino do contrato" in df.columns:
-                for i in range(len(df)):
-                    val = df.at[i, "Termino do contrato"]
-                    if pd.isnull(val):
-                        df.at[i, "Termino do contrato"] = ""
-                    elif isinstance(val, (pd.Timestamp, datetime.datetime)):
-                        df.at[i, "Termino do contrato"] = val.strftime("%d/%m/%Y")
+                df["Termino do contrato"] = df["Termino do contrato"].apply(_datetime_to_str)
 
         output = BytesIO()
         with pd.ExcelWriter(output) as writer:
@@ -300,6 +306,7 @@ with tabs[0]:
                     "Tempo de pagamento": new_tempo_pagamento,
                 }
 
+                # Converte datas para texto dd/mm/aaaa
                 try:
                     dt_inicio = datetime.datetime.strptime(new_inicio_str, "%d/%m/%Y") if new_inicio_str else None
                 except ValueError:
@@ -326,6 +333,7 @@ with tabs[0]:
                 st.session_state.suppliers_data[new_supplier_name] = new_df
                 st.success(f"Fornecedor '{new_supplier_name}' criado com sucesso!")
 
+                # Limpa session state
                 st.session_state.supplier_name = ""
                 st.session_state.product_name = ""
                 st.session_state.auto_id_fornecedor = ""
@@ -354,9 +362,22 @@ with tabs[0]:
         st.subheader("Produtos/Serviços")
         st.caption("Para inserir ou excluir linhas, use o '+' ou a lixeira no `st.data_editor`.")
 
+        # Converte as colunas de data para string no df_original, se ainda estiverem como datetime
+        if "Inicio do contrato" in df_original.columns:
+            df_original["Inicio do contrato"] = df_original["Inicio do contrato"].apply(_datetime_to_str)
+        if "Termino do contrato" in df_original.columns:
+            df_original["Termino do contrato"] = df_original["Termino do contrato"].apply(_datetime_to_str)
+
+        # Garante que CNPJ e Contato sejam string
+        if "CNPJ" in df_original.columns:
+            df_original["CNPJ"] = df_original["CNPJ"].astype(str)
+        if "Contato" in df_original.columns:
+            df_original["Contato"] = df_original["Contato"].astype(str)
+
+        # Configura colunas gerais como disabled no data_editor
         column_config = {col: st.column_config.Column(disabled=True) for col in GENERAL_COLUMNS}
 
-        # Usamos TextColumn para datas e CNPJ/Contato
+        # Use TextColumn para datas e CNPJ/Contato
         if "Inicio do contrato" in df_original.columns:
             column_config["Inicio do contrato"] = st.column_config.TextColumn("Início do Contrato")
         if "Termino do contrato" in df_original.columns:
@@ -385,6 +406,7 @@ with tabs[0]:
             key=f"{supplier}_editor"
         )
 
+        # Sincroniza as colunas gerais com text_input
         for col in GENERAL_COLUMNS:
             edited_df[col] = general_info[col]
 

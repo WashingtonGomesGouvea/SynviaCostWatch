@@ -11,7 +11,7 @@ from office365.sharepoint.files.file import File
 from office365.runtime.auth.user_credential import UserCredential
 
 # -------------------------------------------------------------
-# 1) CREDENCIAIS E CAMINHO DO SHAREPOINT (via st.secrets)
+# 1) CREDENCIAIS E CAMINHO DO SHAREPOINT
 # -------------------------------------------------------------
 EMAIL_REMETENTE = st.secrets["sharepoint"]["email"]
 SENHA_EMAIL = st.secrets["sharepoint"]["password"]
@@ -24,8 +24,8 @@ FILE_URL = st.secrets["sharepoint"]["file_url"]
 GENERAL_COLUMNS = [
     "Fornecedor",
     "ID - Fornecedor",
-    "CNPJ",      # String
-    "Contato",   # String
+    "CNPJ",
+    "Contato",
     "Centro de custo",
 ]
 
@@ -44,11 +44,11 @@ SPECIFIC_COLUMNS = [
     "ID - Pagamento",
     "Status de Pagamento",
     "Orçado",
-    "Valor mensal",       # Campo que o usuário digita
-    "Valor do plano",     # Auto-calculado
+    "Valor mensal",
+    "Valor do plano",
     "Observações",
     "Forma de pagamento",
-    "Tempo de pagamento", # Parcelas
+    "Tempo de pagamento",
 ]
 
 ALL_COLUMNS = GENERAL_COLUMNS + SPECIFIC_COLUMNS
@@ -63,7 +63,6 @@ def parse_float_br(value):
       - "10,0"         -> 10.0
       - "10.0"         -> 10.0
       - "1.234.567,89" -> 1234567.89
-    Sem remover o ponto decimal se for o único ponto.
     """
     if not isinstance(value, str):
         return value
@@ -71,19 +70,16 @@ def parse_float_br(value):
     # Remove "R$" e espaços
     value = value.replace("R$", "").strip()
 
-    # Se contiver ponto e vírgula, assumimos que ponto é milhar e vírgula é decimal
+    # Se contiver ponto e vírgula, ponto é milhar e vírgula é decimal
     if "." in value and "," in value:
-        # Remove pontos
         value = value.replace(".", "")
-        # Troca vírgula por ponto
         value = value.replace(",", ".")
     elif "," in value and "." not in value:
         # Se só tiver vírgula, trocamos por ponto
         value = value.replace(",", ".")
-    # Se só tiver ponto, consideramos decimal
-    # Se não tiver ponto nem vírgula, segue como está
+    # Se só tiver ponto, assumimos decimal
+    # Se não tiver ponto nem vírgula, deixamos como está
 
-    # Tenta converter para float
     try:
         return float(value)
     except ValueError:
@@ -91,7 +87,7 @@ def parse_float_br(value):
 
 def _datetime_to_str(val):
     """
-    Converte datetime/NaT em string DD/MM/AAAA ou retorna str(val) se já for string.
+    Converte datetime/NaT em 'DD/MM/AAAA' ou retorna str(val) se já for string.
     """
     if pd.isnull(val):
         return ""
@@ -189,6 +185,8 @@ def save_data():
         File.save_binary(ctx, FILE_URL, output.read())
 
         st.success("Dados salvos com sucesso!")
+        # Mensagem de aviso para recarregar a página
+        st.warning("Por favor, recarregue a página para atualizar a lista.")
     except Exception as e:
         if "Locked" in str(e) or "423" in str(e):
             st.warning("O arquivo está bloqueado. Feche ou faça check-in antes de salvar.")
@@ -380,7 +378,7 @@ with tabs[0]:
             else:
                 new_df.loc[len(new_df)] = new_row
                 st.session_state.suppliers_data[new_supplier_name] = new_df
-                save_data()
+                save_data()  # Exibe "Dados salvos com sucesso!" e a msg "Por favor, recarregue..."
 
                 # Marca que foi criado e não exibe o form de novo
                 st.session_state.fornecedor_criado = True
@@ -454,7 +452,6 @@ with tabs[0]:
                 st.session_state.suppliers_data.pop(supplier)
                 st.success(f"Fornecedor '{supplier}' excluído com sucesso!")
                 save_data()
-                # Mensagem de aviso para recarregar a página
                 st.warning("Por favor, recarregue a página para atualizar a lista.")
                 st.stop()
 

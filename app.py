@@ -24,8 +24,8 @@ FILE_URL = st.secrets["sharepoint"]["file_url"]
 GENERAL_COLUMNS = [
     "Fornecedor",
     "ID - Fornecedor",
-    "CNPJ",            # Mantemos como string
-    "Contato",         # Também string (padrão telefone)
+    "CNPJ",      # String
+    "Contato",   # String
     "Centro de custo",
 ]
 
@@ -44,39 +44,63 @@ SPECIFIC_COLUMNS = [
     "ID - Pagamento",
     "Status de Pagamento",
     "Orçado",
-    "Valor mensal",
-    "Valor do plano",
+    "Valor mensal",       # Campo que o usuário digita
+    "Valor do plano",     # Auto-calculado
     "Observações",
     "Forma de pagamento",
-    "Tempo de pagamento",
+    "Tempo de pagamento", # Parcelas
 ]
 
 ALL_COLUMNS = GENERAL_COLUMNS + SPECIFIC_COLUMNS
 
 # -------------------------------------------------------------
-# 3) FUNÇÃO PARA CONVERTER STRING DE VALOR -> FLOAT
+# 3) FUNÇÕES AUXILIARES
 # -------------------------------------------------------------
 def parse_float_br(value):
     """
-    Converte strings no formato 'R$ 5.400,00' ou '5.400,00' em float (5400.00).
-    Ajuste conforme seu Excel.
+    Converte strings como:
+      - "R$ 1.234,56"  -> 1234.56
+      - "10,0"         -> 10.0
+      - "10.0"         -> 10.0
+      - "1.234.567,89" -> 1234567.89
+    Sem remover o ponto decimal se for o único ponto.
     """
-    if isinstance(value, str):
-        value = value.replace("R$", "").replace(".", "").replace(",", ".").strip()
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return value
+    if not isinstance(value, str):
+        return value
 
-# -------------------------------------------------------------
-# 3.1) FUNÇÕES PARA GERAR ID AUTOMÁTICO
-# -------------------------------------------------------------
+    # Remove "R$" e espaços
+    value = value.replace("R$", "").strip()
+
+    # Se contiver ponto e vírgula, assumimos que ponto é milhar e vírgula é decimal
+    if "." in value and "," in value:
+        # Remove pontos
+        value = value.replace(".", "")
+        # Troca vírgula por ponto
+        value = value.replace(",", ".")
+    elif "," in value and "." not in value:
+        # Se só tiver vírgula, trocamos por ponto
+        value = value.replace(",", ".")
+    # Se só tiver ponto, consideramos decimal
+    # Se não tiver ponto nem vírgula, segue como está
+
+    # Tenta converter para float
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+def _datetime_to_str(val):
+    """
+    Converte datetime/NaT em string DD/MM/AAAA ou retorna str(val) se já for string.
+    """
+    if pd.isnull(val):
+        return ""
+    if isinstance(val, (pd.Timestamp, datetime.datetime)):
+        return val.strftime("%d/%m/%Y")
+    return str(val)
+
 def generate_id_fornecedor(supplier_name):
-    """
-    Gera um ID automático, pegando as 3 primeiras letras do nome (limpas) + número aleatório.
-    Ex: 'Synvia' -> 'SYN123'
-    """
+    """Ex: 'Synvia' -> 'SYN123'."""
     if not supplier_name:
         return ""
     prefix = re.sub(r"[^A-Za-z]", "", supplier_name).upper()[:3]
@@ -84,10 +108,7 @@ def generate_id_fornecedor(supplier_name):
     return f"{prefix}{rand_num}"
 
 def generate_id_produto(produto_name):
-    """
-    Gera um ID automático para o produto, começando com 'P' + 3 letras do nome + número aleatório.
-    Ex: 'Internet Link' -> 'PINT456'
-    """
+    """Ex: 'Internet Link' -> 'PINT456'."""
     if not produto_name:
         return ""
     prefix = re.sub(r"[^A-Za-z]", "", produto_name).upper()[:3]
@@ -98,45 +119,34 @@ def generate_id_produto(produto_name):
 # 4) CARREGAR DADOS DO SHAREPOINT
 # -------------------------------------------------------------
 def load_data():
-    """
-    Lê o arquivo Excel do SharePoint e retorna um dicionário {aba: DataFrame}.
-    Ignora abas 'MATRIZ' e 'MODELO'.
-    Converte 'CNPJ', 'Contato' e colunas de data para string para evitar problemas no st.data_editor.
-    """
+    """Lê Excel do SharePoint e retorna {aba: DataFrame}, ignorando 'MATRIZ' e 'MODELO'."""
     try:
         ctx = ClientContext(SITE_URL).with_credentials(
             UserCredential(EMAIL_REMETENTE, SENHA_EMAIL)
         )
         response = File.open_binary(ctx, FILE_URL)
-        excel_data = response.content  # bytes
+        excel_data = response.content
 
         sheets = pd.read_excel(BytesIO(excel_data), sheet_name=None)
-
-        # Ignora abas "MATRIZ" e "MODELO"
         filtered_sheets = {
-            name: df for name, df in sheets.items()
-            if name not in ["MATRIZ", "MODELO"]
+            name: df for name, df in sheets.items() if name not in ["MATRIZ", "MODELO"]
         }
 
         for sheet_name, df in filtered_sheets.items():
-            # Garante todas as colunas
             for col in ALL_COLUMNS:
                 if col not in df.columns:
                     df[col] = ""
 
-            # Converte 'CNPJ' e 'Contato' em string
             if "CNPJ" in df.columns:
                 df["CNPJ"] = df["CNPJ"].astype(str)
             if "Contato" in df.columns:
                 df["Contato"] = df["Contato"].astype(str)
 
-            # Se "Inicio do contrato" / "Termino do contrato" vier como datetime, converte para string "DD/MM/AAAA"
             if "Inicio do contrato" in df.columns:
                 df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
             if "Termino do contrato" in df.columns:
                 df["Termino do contrato"] = df["Termino do contrato"].apply(_datetime_to_str)
 
-            # Converte valores monetários
             if "Valor mensal" in df.columns:
                 df["Valor mensal"] = df["Valor mensal"].apply(parse_float_br)
             if "Valor do plano" in df.columns:
@@ -150,35 +160,18 @@ def load_data():
         st.error(f"Erro ao carregar o arquivo Excel: {e}")
         return {}
 
-def _datetime_to_str(val):
-    """
-    Converte um valor datetime para string no formato DD/MM/AAAA.
-    Se for NaT, retorna "".
-    Se já for string, retorna como está.
-    """
-    if pd.isnull(val):
-        return ""
-    if isinstance(val, (pd.Timestamp, datetime.datetime)):
-        return val.strftime("%d/%m/%Y")
-    return str(val)  # Se já for string, ou outro tipo
-
 # -------------------------------------------------------------
-# 5) SALVAR DADOS DE VOLTA NO SHAREPOINT
+# 5) SALVAR DADOS
 # -------------------------------------------------------------
 def save_data():
-    """
-    Converte datas para texto (dd/mm/aaaa) antes de salvar no Excel.
-    Garante que 'CNPJ' e 'Contato' permaneçam como string.
-    """
+    """Converte datas para texto e salva no SharePoint."""
     try:
         for supplier_name, df in st.session_state.suppliers_data.items():
-            # Garante que 'CNPJ' e 'Contato' são string
             if "CNPJ" in df.columns:
                 df["CNPJ"] = df["CNPJ"].astype(str)
             if "Contato" in df.columns:
                 df["Contato"] = df["Contato"].astype(str)
 
-            # Converte datas em texto
             if "Inicio do contrato" in df.columns:
                 df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
             if "Termino do contrato" in df.columns:
@@ -198,23 +191,47 @@ def save_data():
         st.success("Dados salvos com sucesso!")
     except Exception as e:
         if "Locked" in str(e) or "423" in str(e):
-            st.warning(
-                "O arquivo está bloqueado para edição (aberto por outra pessoa ou em uso). "
-                "Feche o arquivo ou faça check-in para liberá-lo antes de salvar."
-            )
+            st.warning("O arquivo está bloqueado. Feche ou faça check-in antes de salvar.")
         else:
             st.error(f"Erro ao salvar o arquivo Excel: {e}")
 
 # -------------------------------------------------------------
-# 6) INICIALIZA O ST.SESSION_STATE
+# 6) AUTO-CÁLCULO
+# -------------------------------------------------------------
+def auto_calc_valor_plano():
+    """Callback para atualizar Valor do plano."""
+    val_mensal_str = st.session_state.get("new_valor_mensal_str", "")
+    parcelas_str = st.session_state.get("new_tempo_pagamento", "")
+
+    val_mensal = parse_float_br(val_mensal_str)
+    try:
+        parcelas = int(parcelas_str)
+    except ValueError:
+        parcelas = 1
+
+    if val_mensal is not None and parcelas > 0:
+        total = val_mensal * parcelas
+        st.session_state["new_valor_plano_str"] = f"{total:.2f}"
+    else:
+        st.session_state["new_valor_plano_str"] = ""
+
+# -------------------------------------------------------------
+# 7) INICIALIZA ST.SESSION_STATE
 # -------------------------------------------------------------
 if "suppliers_data" not in st.session_state:
     st.session_state.suppliers_data = load_data()
 
+if "fornecedor_criado" not in st.session_state:
+    st.session_state.fornecedor_criado = False
+
+for key in ["new_valor_mensal_str", "new_tempo_pagamento", "new_valor_plano_str"]:
+    if key not in st.session_state:
+        st.session_state[key] = ""
+
 suppliers = list(st.session_state.suppliers_data.keys())
 
 # -------------------------------------------------------------
-# 7) ABA(S) NO STREAMLIT
+# 8) ABA(S) NO STREAMLIT
 # -------------------------------------------------------------
 tabs = st.tabs(["Gerenciar Fornecedores", "Lista de Fornecedores"])
 
@@ -229,16 +246,32 @@ with tabs[0]:
         ["Adicionar Novo Fornecedor"] + suppliers
     )
 
-    if selected_supplier == "Adicionar Novo Fornecedor":
+    # Se o fornecedor foi criado, mostramos mensagem e um botão para criar outro
+    if st.session_state.fornecedor_criado and selected_supplier == "Adicionar Novo Fornecedor":
+        st.success("Fornecedor criado com sucesso!")
+        if st.button("Criar outro fornecedor"):
+            # Limpa manualmente as variáveis
+            st.session_state.fornecedor_criado = False
+            st.session_state["new_valor_mensal_str"] = ""
+            st.session_state["new_tempo_pagamento"] = ""
+            st.session_state["new_valor_plano_str"] = ""
+            st.session_state["supplier_name"] = ""
+            st.session_state["product_name"] = ""
+            st.session_state["auto_id_fornecedor"] = ""
+            st.session_state["auto_id_produto"] = ""
+        else:
+            st.info("Clique em 'Criar outro fornecedor' para limpar o formulário.")
+        # Não exibe o formulário novamente neste ciclo
+    elif selected_supplier == "Adicionar Novo Fornecedor" and not st.session_state.fornecedor_criado:
         st.subheader("Adicionar Novo Fornecedor")
 
+        # IDs
         if "supplier_name" not in st.session_state:
             st.session_state.supplier_name = ""
         if "product_name" not in st.session_state:
             st.session_state.product_name = ""
 
         new_supplier_name = st.text_input("Nome do Fornecedor", value=st.session_state.supplier_name)
-
         if new_supplier_name != st.session_state.supplier_name:
             st.session_state.supplier_name = new_supplier_name
             st.session_state.auto_id_fornecedor = generate_id_fornecedor(new_supplier_name)
@@ -248,12 +281,12 @@ with tabs[0]:
             value=st.session_state.get("auto_id_fornecedor", "")
         )
 
-        new_cnpj = st.text_input("CNPJ")  # string
-        new_contato = st.text_input("Contato (ex: (12) 982896323)")  # string
+        new_cnpj = st.text_input("CNPJ")
+        new_contato = st.text_input("Contato")
         new_centro_custo = st.text_input("Centro de custo")
 
+        # Produto
         new_descricao_produto = st.text_input("Descrição do Produto", value=st.session_state.product_name)
-
         if new_descricao_produto != st.session_state.product_name:
             st.session_state.product_name = new_descricao_produto
             st.session_state.auto_id_produto = generate_id_produto(new_descricao_produto)
@@ -264,7 +297,6 @@ with tabs[0]:
         )
 
         new_status = "ATIVO"
-
         localidades = ["PAULINIA", "AMBAS", "CAMPINAS"]
         new_localidade = st.selectbox("Localidade", localidades)
 
@@ -273,76 +305,88 @@ with tabs[0]:
         forma_options = ["A Prazo", "A Vista"]
         new_forma_pagamento = st.selectbox("Forma de pagamento", forma_options)
 
-        def_tempo = ""
+        # Se for "A Vista", define parcelas = 1
         if new_forma_pagamento == "A Vista":
-            def_tempo = "1"
-        new_tempo_pagamento = st.text_input("Tempo de pagamento (Parcelas)", value=def_tempo)
+            st.session_state["new_tempo_pagamento"] = "1"
 
+        # Valor Mensal e Tempo de pagamento (callbacks)
+        st.text_input(
+            "Valor Mensal (R$)",
+            key="new_valor_mensal_str",
+            on_change=auto_calc_valor_plano
+        )
+        st.text_input(
+            "Tempo de pagamento (Parcelas)",
+            key="new_tempo_pagamento",
+            on_change=auto_calc_valor_plano
+        )
+        st.text_input(
+            "Valor do Plano (R$) - Autopreenchido",
+            key="new_valor_plano_str",
+            disabled=True
+        )
+
+        # Datas
         new_inicio_str = st.text_input("Início do contrato (DD/MM/AAAA)", "")
         new_termino_str = st.text_input("Término do contrato (DD/MM/AAAA)", "")
-        new_valor_mensal_str = st.text_input("Valor Mensal (R$)", "")
-        new_valor_plano_str = st.text_input("Valor do Plano (R$)", "")
 
         if st.button("Criar Fornecedor"):
+            val_mensal = parse_float_br(st.session_state["new_valor_mensal_str"])
+            val_plano = parse_float_br(st.session_state["new_valor_plano_str"])
+
+            new_df = pd.DataFrame(columns=ALL_COLUMNS)
+
+            try:
+                dt_inicio = datetime.datetime.strptime(new_inicio_str, "%d/%m/%Y") if new_inicio_str else None
+            except ValueError:
+                dt_inicio = None
+            if dt_inicio:
+                inicio_fmt = dt_inicio.strftime("%d/%m/%Y")
+            else:
+                inicio_fmt = ""
+
+            try:
+                dt_termino = datetime.datetime.strptime(new_termino_str, "%d/%m/%Y") if new_termino_str else None
+            except ValueError:
+                dt_termino = None
+            if dt_termino:
+                termino_fmt = dt_termino.strftime("%d/%m/%Y")
+            else:
+                termino_fmt = ""
+
+            new_row = {
+                "Fornecedor": new_supplier_name,
+                "ID - Fornecedor": new_id_fornecedor,
+                "CNPJ": new_cnpj,
+                "Contato": new_contato,
+                "Centro de custo": new_centro_custo,
+                "Descrição do Produto": new_descricao_produto,
+                "ID - Produto": new_id_produto,
+                "Status": new_status,
+                "Localidade": new_localidade,
+                "Metodo de pagamento": new_metodo_pagamento,
+                "Forma de pagamento": new_forma_pagamento,
+                "Tempo de pagamento": st.session_state["new_tempo_pagamento"],
+                "Valor mensal": val_mensal,
+                "Valor do plano": val_plano,
+                "Inicio do contrato": inicio_fmt,
+                "Termino do contrato": termino_fmt
+            }
+
             if not new_supplier_name:
                 st.error("É preciso informar um nome para o fornecedor.")
             elif new_supplier_name in suppliers:
                 st.error("Esse fornecedor já existe.")
             else:
-                new_df = pd.DataFrame(columns=ALL_COLUMNS)
-
-                new_row = {
-                    "Fornecedor": new_supplier_name,
-                    "ID - Fornecedor": new_id_fornecedor,
-                    "CNPJ": new_cnpj,
-                    "Contato": new_contato,
-                    "Centro de custo": new_centro_custo,
-                    "Descrição do Produto": new_descricao_produto,
-                    "ID - Produto": new_id_produto,
-                    "Status": new_status,
-                    "Localidade": new_localidade,
-                    "Metodo de pagamento": new_metodo_pagamento,
-                    "Forma de pagamento": new_forma_pagamento,
-                    "Tempo de pagamento": new_tempo_pagamento,
-                }
-
-                # Converte datas para texto dd/mm/aaaa
-                try:
-                    dt_inicio = datetime.datetime.strptime(new_inicio_str, "%d/%m/%Y") if new_inicio_str else None
-                except ValueError:
-                    dt_inicio = None
-                if dt_inicio:
-                    new_row["Inicio do contrato"] = dt_inicio.strftime("%d/%m/%Y")
-                else:
-                    new_row["Inicio do contrato"] = ""
-
-                try:
-                    dt_termino = datetime.datetime.strptime(new_termino_str, "%d/%m/%Y") if new_termino_str else None
-                except ValueError:
-                    dt_termino = None
-                if dt_termino:
-                    new_row["Termino do contrato"] = dt_termino.strftime("%d/%m/%Y")
-                else:
-                    new_row["Termino do contrato"] = ""
-
-                new_row["Valor mensal"] = parse_float_br(new_valor_mensal_str)
-                new_row["Valor do plano"] = parse_float_br(new_valor_plano_str)
-
                 new_df.loc[len(new_df)] = new_row
-
                 st.session_state.suppliers_data[new_supplier_name] = new_df
-                st.success(f"Fornecedor '{new_supplier_name}' criado com sucesso!")
-
-                # Limpa session state
-                st.session_state.supplier_name = ""
-                st.session_state.product_name = ""
-                st.session_state.auto_id_fornecedor = ""
-                st.session_state.auto_id_produto = ""
-
                 save_data()
-                suppliers = list(st.session_state.suppliers_data.keys())
+
+                # Marca que foi criado e não exibe o form de novo
+                st.session_state.fornecedor_criado = True
 
     else:
+        # EDIÇÃO DE FORNECEDOR EXISTENTE
         supplier = selected_supplier
         df_original = st.session_state.suppliers_data[supplier].copy()
 
@@ -362,22 +406,17 @@ with tabs[0]:
         st.subheader("Produtos/Serviços")
         st.caption("Para inserir ou excluir linhas, use o '+' ou a lixeira no `st.data_editor`.")
 
-        # Converte as colunas de data para string no df_original, se ainda estiverem como datetime
         if "Inicio do contrato" in df_original.columns:
             df_original["Inicio do contrato"] = df_original["Inicio do contrato"].apply(_datetime_to_str)
         if "Termino do contrato" in df_original.columns:
             df_original["Termino do contrato"] = df_original["Termino do contrato"].apply(_datetime_to_str)
-
-        # Garante que CNPJ e Contato sejam string
         if "CNPJ" in df_original.columns:
             df_original["CNPJ"] = df_original["CNPJ"].astype(str)
         if "Contato" in df_original.columns:
             df_original["Contato"] = df_original["Contato"].astype(str)
 
-        # Configura colunas gerais como disabled no data_editor
         column_config = {col: st.column_config.Column(disabled=True) for col in GENERAL_COLUMNS}
 
-        # Use TextColumn para datas e CNPJ/Contato
         if "Inicio do contrato" in df_original.columns:
             column_config["Inicio do contrato"] = st.column_config.TextColumn("Início do Contrato")
         if "Termino do contrato" in df_original.columns:
@@ -387,17 +426,10 @@ with tabs[0]:
         if "Contato" in df_original.columns:
             column_config["Contato"] = st.column_config.TextColumn("Contato")
 
-        # Mantemos NumberColumn para valores
         if "Valor mensal" in df_original.columns:
-            column_config["Valor mensal"] = st.column_config.NumberColumn(
-                "Valor Mensal",
-                format="%.2f"
-            )
+            column_config["Valor mensal"] = st.column_config.NumberColumn("Valor Mensal", format="%.2f")
         if "Valor do plano" in df_original.columns:
-            column_config["Valor do plano"] = st.column_config.NumberColumn(
-                "Valor do Plano",
-                format="%.2f"
-            )
+            column_config["Valor do plano"] = st.column_config.NumberColumn("Valor do Plano", format="%.2f")
 
         edited_df = st.data_editor(
             df_original,
@@ -406,9 +438,9 @@ with tabs[0]:
             key=f"{supplier}_editor"
         )
 
-        # Sincroniza as colunas gerais com text_input
-        for col in GENERAL_COLUMNS:
-            edited_df[col] = general_info[col]
+        if not edited_df.empty:
+            for col in GENERAL_COLUMNS:
+                edited_df.at[0, col] = general_info[col]
 
         st.session_state.suppliers_data[supplier] = edited_df
 
@@ -422,6 +454,7 @@ with tabs[0]:
                 st.session_state.suppliers_data.pop(supplier)
                 st.success(f"Fornecedor '{supplier}' excluído com sucesso!")
                 save_data()
+                # Mensagem de aviso para recarregar a página
                 st.warning("Por favor, recarregue a página para atualizar a lista.")
                 st.stop()
 
@@ -431,7 +464,6 @@ with tabs[0]:
 with tabs[1]:
     st.title("Lista de Fornecedores")
 
-    # Link para Power BI
     st.write("### Dashboard no Power BI")
     st.markdown(
         "[Clique aqui para visualizar o relatório Power BI](https://app.powerbi.com/reportEmbed?reportId=cf2f800d-cf4a-4cb7-b871-99e583f70aa8&autoAuth=true&ctid=fee1b506-24b6-444a-919e-83df9442dc5d)",
@@ -446,7 +478,6 @@ with tabs[1]:
         unsafe_allow_html=True
     )
 
-    # Link para pasta com arquivos-fonte
     st.write("### Pasta SharePoint com arquivos-fonte")
     st.markdown(
         "[Acesse aqui a pasta no SharePoint](https://synviagroup.sharepoint.com/:f:/r/sites/gestaodeprodutos/Documentos%20Compartilhados/Gest%C3%A3o%20financeira?csf=1&web=1&e=vHmqxV)",

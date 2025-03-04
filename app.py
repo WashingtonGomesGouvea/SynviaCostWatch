@@ -37,18 +37,18 @@ SPECIFIC_COLUMNS = [
     "Status",
     "Inicio do contrato",
     "Termino do contrato",
-    "Tempo de contrato",
+    "Tempo de contrato",  # Calculado em meses
     "Metodo de pagamento",
     "Tipo de pagamento",
     "Dia de Pagamento",
     "ID - Pagamento",
     "Status de Pagamento",
-    "Orçado",
     "Valor mensal",
     "Valor do plano",
-    "Observações",
-    "Forma de pagamento",
     "Tempo de pagamento",
+    "Orçado",             # Sim/Não
+    "Observações",        # Texto livre
+    "Forma de pagamento",
 ]
 
 ALL_COLUMNS = GENERAL_COLUMNS + SPECIFIC_COLUMNS
@@ -67,18 +67,12 @@ def parse_float_br(value):
     if not isinstance(value, str):
         return value
 
-    # Remove "R$" e espaços
     value = value.replace("R$", "").strip()
-
-    # Se contiver ponto e vírgula, ponto é milhar e vírgula é decimal
     if "." in value and "," in value:
         value = value.replace(".", "")
         value = value.replace(",", ".")
     elif "," in value and "." not in value:
-        # Se só tiver vírgula, trocamos por ponto
         value = value.replace(",", ".")
-    # Se só tiver ponto, assumimos decimal
-    # Se não tiver ponto nem vírgula, deixamos como está
 
     try:
         return float(value)
@@ -118,9 +112,9 @@ def load_data():
     """Lê Excel do SharePoint e retorna {aba: DataFrame}, ignorando 'MATRIZ' e 'MODELO'."""
     try:
         ctx = ClientContext(SITE_URL).with_credentials(
-            UserCredential(EMAIL_REMETENTE, SENHA_EMAIL)
+            UserCredential(st.secrets["sharepoint"]["email"], st.secrets["sharepoint"]["password"])
         )
-        response = File.open_binary(ctx, FILE_URL)
+        response = File.open_binary(ctx, st.secrets["sharepoint"]["file_url"])
         excel_data = response.content
 
         sheets = pd.read_excel(BytesIO(excel_data), sheet_name=None)
@@ -160,7 +154,7 @@ def load_data():
 # 5) SALVAR DADOS
 # -------------------------------------------------------------
 def save_data():
-    """Converte datas para texto e salva no SharePoint."""
+    """Converte datas para texto e salva no SharePoint, exibindo mensagem final."""
     try:
         for supplier_name, df in st.session_state.suppliers_data.items():
             if "CNPJ" in df.columns:
@@ -179,13 +173,12 @@ def save_data():
                 df.to_excel(writer, sheet_name=supplier_name, index=False)
         output.seek(0)
 
-        ctx = ClientContext(SITE_URL).with_credentials(
-            UserCredential(EMAIL_REMETENTE, SENHA_EMAIL)
+        ctx = ClientContext(st.secrets["sharepoint"]["site_url"]).with_credentials(
+            UserCredential(st.secrets["sharepoint"]["email"], st.secrets["sharepoint"]["password"])
         )
-        File.save_binary(ctx, FILE_URL, output.read())
+        File.save_binary(ctx, st.secrets["sharepoint"]["file_url"], output.read())
 
         st.success("Dados salvos com sucesso!")
-        # Mensagem de aviso para recarregar a página
         st.warning("Por favor, recarregue a página para atualizar a lista.")
     except Exception as e:
         if "Locked" in str(e) or "423" in str(e):
@@ -260,6 +253,7 @@ with tabs[0]:
         else:
             st.info("Clique em 'Criar outro fornecedor' para limpar o formulário.")
         # Não exibe o formulário novamente neste ciclo
+
     elif selected_supplier == "Adicionar Novo Fornecedor" and not st.session_state.fornecedor_criado:
         st.subheader("Adicionar Novo Fornecedor")
 
@@ -328,29 +322,48 @@ with tabs[0]:
         new_inicio_str = st.text_input("Início do contrato (DD/MM/AAAA)", "")
         new_termino_str = st.text_input("Término do contrato (DD/MM/AAAA)", "")
 
+        # Orçado: Sim ou Não (campo no final)
+        new_orcado = st.selectbox("Orçado", ["Sim", "Não"])
+
+        # Observações (campo no final)
+        new_observacoes = st.text_input("Observações")
+
         if st.button("Criar Fornecedor"):
             val_mensal = parse_float_br(st.session_state["new_valor_mensal_str"])
             val_plano = parse_float_br(st.session_state["new_valor_plano_str"])
 
             new_df = pd.DataFrame(columns=ALL_COLUMNS)
 
+            # Converte strings em datetime
             try:
                 dt_inicio = datetime.datetime.strptime(new_inicio_str, "%d/%m/%Y") if new_inicio_str else None
             except ValueError:
                 dt_inicio = None
-            if dt_inicio:
-                inicio_fmt = dt_inicio.strftime("%d/%m/%Y")
-            else:
-                inicio_fmt = ""
-
             try:
                 dt_termino = datetime.datetime.strptime(new_termino_str, "%d/%m/%Y") if new_termino_str else None
             except ValueError:
                 dt_termino = None
+
+            # Formata datas ou deixa em branco
+            if dt_inicio:
+                inicio_fmt = dt_inicio.strftime("%d/%m/%Y")
+            else:
+                inicio_fmt = ""
             if dt_termino:
                 termino_fmt = dt_termino.strftime("%d/%m/%Y")
             else:
                 termino_fmt = ""
+
+            # Calcula tempo de contrato em meses (dia-based)
+            tempo_contrato = 0
+            if dt_inicio and dt_termino:
+                meses = (dt_termino.year - dt_inicio.year)*12 + (dt_termino.month - dt_inicio.month)
+                # Ajuste se dia final >= dia inicial => +1
+                if dt_termino.day >= dt_inicio.day:
+                    meses += 1
+                if meses < 0:
+                    meses = 0
+                tempo_contrato = meses
 
             new_row = {
                 "Fornecedor": new_supplier_name,
@@ -364,11 +377,14 @@ with tabs[0]:
                 "Localidade": new_localidade,
                 "Metodo de pagamento": new_metodo_pagamento,
                 "Forma de pagamento": new_forma_pagamento,
-                "Tempo de pagamento": st.session_state["new_tempo_pagamento"],
                 "Valor mensal": val_mensal,
                 "Valor do plano": val_plano,
+                "Tempo de pagamento": st.session_state["new_tempo_pagamento"],
                 "Inicio do contrato": inicio_fmt,
-                "Termino do contrato": termino_fmt
+                "Termino do contrato": termino_fmt,
+                "Tempo de contrato": tempo_contrato,
+                "Orçado": new_orcado,
+                "Observações": new_observacoes,
             }
 
             if not new_supplier_name:
@@ -378,7 +394,7 @@ with tabs[0]:
             else:
                 new_df.loc[len(new_df)] = new_row
                 st.session_state.suppliers_data[new_supplier_name] = new_df
-                save_data()  # Exibe "Dados salvos com sucesso!" e a msg "Por favor, recarregue..."
+                save_data()
 
                 # Marca que foi criado e não exibe o form de novo
                 st.session_state.fornecedor_criado = True
@@ -438,7 +454,7 @@ with tabs[0]:
 
         if not edited_df.empty:
             for col in GENERAL_COLUMNS:
-                edited_df.at[0, col] = general_info[col]
+                edited_df[col] = general_info[col]
 
         st.session_state.suppliers_data[supplier] = edited_df
 
@@ -449,10 +465,12 @@ with tabs[0]:
 
         with col2:
             if st.button("Excluir Fornecedor", key=f"{supplier}_delete"):
+                # Remove do dicionário
                 st.session_state.suppliers_data.pop(supplier)
+                # Mensagem 1: Excluído
                 st.success(f"Fornecedor '{supplier}' excluído com sucesso!")
+                # Mensagem 2: Salva e exibe "Dados salvos com sucesso!"
                 save_data()
-                st.warning("Por favor, recarregue a página para atualizar a lista.")
                 st.stop()
 
 # -------------------------------------------------------------

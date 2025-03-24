@@ -37,7 +37,7 @@ SPECIFIC_COLUMNS = [
     "Status",
     "Inicio do contrato",
     "Termino do contrato",
-    "Tempo de contrato",  # Calculado em meses
+    "Tempo de contrato",    # Calculado em meses
     "Metodo de pagamento",
     "Tipo de pagamento",
     "Dia de Pagamento",
@@ -46,9 +46,10 @@ SPECIFIC_COLUMNS = [
     "Valor mensal",
     "Valor do plano",
     "Tempo de pagamento",
-    "Orçado",             # Sim/Não
-    "Observações",        # Texto livre
+    "Orçado",               # Sim/Não
+    "Observações",          # Texto livre
     "Forma de pagamento",
+    "Início do Pagamento",  # <-- NOVO CAMPO
 ]
 
 ALL_COLUMNS = GENERAL_COLUMNS + SPECIFIC_COLUMNS
@@ -68,6 +69,7 @@ def parse_float_br(value):
         return value
 
     value = value.replace("R$", "").strip()
+    # Se tiver ponto e vírgula, remove pontos e troca vírgula por ponto
     if "." in value and "," in value:
         value = value.replace(".", "")
         value = value.replace(",", ".")
@@ -112,9 +114,9 @@ def load_data():
     """Lê Excel do SharePoint e retorna {aba: DataFrame}, ignorando 'MATRIZ' e 'MODELO'."""
     try:
         ctx = ClientContext(SITE_URL).with_credentials(
-            UserCredential(st.secrets["sharepoint"]["email"], st.secrets["sharepoint"]["password"])
+            UserCredential(EMAIL_REMETENTE, SENHA_EMAIL)
         )
-        response = File.open_binary(ctx, st.secrets["sharepoint"]["file_url"])
+        response = File.open_binary(ctx, FILE_URL)
         excel_data = response.content
 
         sheets = pd.read_excel(BytesIO(excel_data), sheet_name=None)
@@ -123,20 +125,27 @@ def load_data():
         }
 
         for sheet_name, df in filtered_sheets.items():
+            # Garante todas as colunas
             for col in ALL_COLUMNS:
                 if col not in df.columns:
                     df[col] = ""
 
+            # Converte campos de texto
             if "CNPJ" in df.columns:
                 df["CNPJ"] = df["CNPJ"].astype(str)
             if "Contato" in df.columns:
                 df["Contato"] = df["Contato"].astype(str)
 
+            # Converte datas em texto
             if "Inicio do contrato" in df.columns:
                 df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
             if "Termino do contrato" in df.columns:
                 df["Termino do contrato"] = df["Termino do contrato"].apply(_datetime_to_str)
+            # Se "Início do Pagamento" já existir no Excel, converte também
+            if "Início do Pagamento" in df.columns:
+                df["Início do Pagamento"] = df["Início do Pagamento"].apply(_datetime_to_str)
 
+            # Converte valores monetários
             if "Valor mensal" in df.columns:
                 df["Valor mensal"] = df["Valor mensal"].apply(parse_float_br)
             if "Valor do plano" in df.columns:
@@ -157,26 +166,32 @@ def save_data():
     """Converte datas para texto e salva no SharePoint, exibindo mensagem final."""
     try:
         for supplier_name, df in st.session_state.suppliers_data.items():
+            # Força campos de texto
             if "CNPJ" in df.columns:
                 df["CNPJ"] = df["CNPJ"].astype(str)
             if "Contato" in df.columns:
                 df["Contato"] = df["Contato"].astype(str)
 
+            # Converte datas em texto
             if "Inicio do contrato" in df.columns:
                 df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
             if "Termino do contrato" in df.columns:
                 df["Termino do contrato"] = df["Termino do contrato"].apply(_datetime_to_str)
+            if "Início do Pagamento" in df.columns:
+                df["Início do Pagamento"] = df["Início do Pagamento"].apply(_datetime_to_str)
 
+        # Salva em memória
         output = BytesIO()
         with pd.ExcelWriter(output) as writer:
             for supplier_name, df in st.session_state.suppliers_data.items():
                 df.to_excel(writer, sheet_name=supplier_name, index=False)
         output.seek(0)
 
-        ctx = ClientContext(st.secrets["sharepoint"]["site_url"]).with_credentials(
-            UserCredential(st.secrets["sharepoint"]["email"], st.secrets["sharepoint"]["password"])
+        # Upload pro SharePoint
+        ctx = ClientContext(SITE_URL).with_credentials(
+            UserCredential(EMAIL_REMETENTE, SENHA_EMAIL)
         )
-        File.save_binary(ctx, st.secrets["sharepoint"]["file_url"], output.read())
+        File.save_binary(ctx, FILE_URL, output.read())
 
         st.success("Dados salvos com sucesso!")
         st.warning("Por favor, recarregue a página para atualizar a lista.")
@@ -215,6 +230,7 @@ if "suppliers_data" not in st.session_state:
 if "fornecedor_criado" not in st.session_state:
     st.session_state.fornecedor_criado = False
 
+# Garantimos que as chaves existam
 for key in ["new_valor_mensal_str", "new_tempo_pagamento", "new_valor_plano_str"]:
     if key not in st.session_state:
         st.session_state[key] = ""
@@ -318,9 +334,12 @@ with tabs[0]:
             disabled=True
         )
 
-        # Datas
+        # Campos de datas
         new_inicio_str = st.text_input("Início do contrato (DD/MM/AAAA)", "")
         new_termino_str = st.text_input("Término do contrato (DD/MM/AAAA)", "")
+        
+        # NOVO: Início do Pagamento
+        new_inicio_pag_str = st.text_input("Início do Pagamento (DD/MM/AAAA)", "")
 
         # Orçado: Sim ou Não (campo no final)
         new_orcado = st.selectbox("Orçado", ["Sim", "Não"])
@@ -336,13 +355,18 @@ with tabs[0]:
 
             # Converte strings em datetime
             try:
-                dt_inicio = datetime.datetime.strptime(new_inicio_str, "%d/%m/%Y") if new_inicio_str else None
+                dt_inicio = datetime.datetime.strptime(new_inicio_str.strip(), "%d/%m/%Y") if new_inicio_str.strip() else None
             except ValueError:
                 dt_inicio = None
             try:
-                dt_termino = datetime.datetime.strptime(new_termino_str, "%d/%m/%Y") if new_termino_str else None
+                dt_termino = datetime.datetime.strptime(new_termino_str.strip(), "%d/%m/%Y") if new_termino_str.strip() else None
             except ValueError:
                 dt_termino = None
+            # Trata Início do Pagamento
+            try:
+                dt_inicio_pag = datetime.datetime.strptime(new_inicio_pag_str.strip(), "%d/%m/%Y") if new_inicio_pag_str.strip() else None
+            except ValueError:
+                dt_inicio_pag = None
 
             # Formata datas ou deixa em branco
             if dt_inicio:
@@ -353,12 +377,15 @@ with tabs[0]:
                 termino_fmt = dt_termino.strftime("%d/%m/%Y")
             else:
                 termino_fmt = ""
+            if dt_inicio_pag:
+                inicio_pag_fmt = dt_inicio_pag.strftime("%d/%m/%Y")
+            else:
+                inicio_pag_fmt = ""
 
             # Calcula tempo de contrato em meses (dia-based)
             tempo_contrato = 0
             if dt_inicio and dt_termino:
                 meses = (dt_termino.year - dt_inicio.year)*12 + (dt_termino.month - dt_inicio.month)
-                # Ajuste se dia final >= dia inicial => +1
                 if dt_termino.day >= dt_inicio.day:
                     meses += 1
                 if meses < 0:
@@ -383,6 +410,7 @@ with tabs[0]:
                 "Inicio do contrato": inicio_fmt,
                 "Termino do contrato": termino_fmt,
                 "Tempo de contrato": tempo_contrato,
+                "Início do Pagamento": inicio_pag_fmt,  # <--- Armazenamos aqui
                 "Orçado": new_orcado,
                 "Observações": new_observacoes,
             }
@@ -420,6 +448,7 @@ with tabs[0]:
         st.subheader("Produtos/Serviços")
         st.caption("Para inserir ou excluir linhas, use o '+' ou a lixeira no `st.data_editor`.")
 
+        # Converte datas
         if "Inicio do contrato" in df_original.columns:
             df_original["Inicio do contrato"] = df_original["Inicio do contrato"].apply(_datetime_to_str)
         if "Termino do contrato" in df_original.columns:
@@ -428,7 +457,11 @@ with tabs[0]:
             df_original["CNPJ"] = df_original["CNPJ"].astype(str)
         if "Contato" in df_original.columns:
             df_original["Contato"] = df_original["Contato"].astype(str)
+        # Se Início do Pagamento existir, converter também
+        if "Início do Pagamento" in df_original.columns:
+            df_original["Início do Pagamento"] = df_original["Início do Pagamento"].apply(_datetime_to_str)
 
+        # Configura colunas gerais como disabled
         column_config = {col: st.column_config.Column(disabled=True) for col in GENERAL_COLUMNS}
 
         if "Inicio do contrato" in df_original.columns:
@@ -444,6 +477,9 @@ with tabs[0]:
             column_config["Valor mensal"] = st.column_config.NumberColumn("Valor Mensal", format="%.2f")
         if "Valor do plano" in df_original.columns:
             column_config["Valor do plano"] = st.column_config.NumberColumn("Valor do Plano", format="%.2f")
+        # Se quiser também travar "Início do Pagamento", adicione aqui
+        if "Início do Pagamento" in df_original.columns:
+            column_config["Início do Pagamento"] = st.column_config.TextColumn("Início do Pagamento")
 
         edited_df = st.data_editor(
             df_original,
@@ -452,6 +488,7 @@ with tabs[0]:
             key=f"{supplier}_editor"
         )
 
+        # Copia valores dos text_input (informações gerais) para a primeira linha do df
         if not edited_df.empty:
             for col in GENERAL_COLUMNS:
                 edited_df[col] = general_info[col]
@@ -465,11 +502,8 @@ with tabs[0]:
 
         with col2:
             if st.button("Excluir Fornecedor", key=f"{supplier}_delete"):
-                # Remove do dicionário
                 st.session_state.suppliers_data.pop(supplier)
-                # Mensagem 1: Excluído
                 st.success(f"Fornecedor '{supplier}' excluído com sucesso!")
-                # Mensagem 2: Salva e exibe "Dados salvos com sucesso!"
                 save_data()
                 st.stop()
 

@@ -510,7 +510,7 @@ with tabs[0]:
             elif new_supplier_name in suppliers:
                 st.error("Esse fornecedor já existe.")
             else:
-                import pandas as pd
+                
                 new_df = pd.DataFrame(columns=ALL_COLUMNS)
                 new_df.loc[len(new_df)] = new_row
                 st.session_state.suppliers_data[new_supplier_name] = new_df
@@ -664,7 +664,7 @@ with tabs[2]:
                     "Mes": sel_mes,
                 }
 
-                import pandas as pd
+                
                 new_line_df = pd.DataFrame([new_row])
                 df_mensal = pd.concat([df_mensal, new_line_df], ignore_index=True)
 

@@ -339,7 +339,6 @@ def save_controle_mensal():
         try:
             ctx = ClientContext(SITE_URL).with_credentials(UserCredential(EMAIL_REMETENTE, SENHA_EMAIL))
             File.save_binary(ctx, map_ano_arquivo[ano], output.getvalue())
-            # Mensagem de sucesso mais clara:
             st.success(f"Os pagamentos referentes a {ano} foram salvos com sucesso no Excel do SharePoint!")
         except Exception as e:
             if "Locked" in str(e) or "423" in str(e):
@@ -511,7 +510,6 @@ with tabs[0]:
             elif new_supplier_name in suppliers:
                 st.error("Esse fornecedor já existe.")
             else:
-                
                 new_df = pd.DataFrame(columns=ALL_COLUMNS)
                 new_df.loc[len(new_df)] = new_row
                 st.session_state.suppliers_data[new_supplier_name] = new_df
@@ -615,6 +613,13 @@ with tabs[2]:
         final_id_pag = typed_id_pag.strip()
     else:
         final_id_pag = chosen_id_pag
+        # Exibe a descrição do produto associada ao ID escolhido
+        mask = df_temp_forn["ID - Pagamento"] == chosen_id_pag
+        if mask.any():
+            descricao_produto = df_temp_forn.loc[mask, "Descrição do Produto"].iloc[0]
+            st.info(f"Descrição do Produto: {descricao_produto}")
+        else:
+            st.info("Nenhuma descrição encontrada para o ID selecionado.")
 
     sel_categoria = st.selectbox("Categoria do Produto/Serviço", category_options)
     dia_vencimento = st.text_input("Dia Vencimento")
@@ -665,7 +670,6 @@ with tabs[2]:
                     "Mes": sel_mes,
                 }
 
-                
                 new_line_df = pd.DataFrame([new_row])
                 df_mensal = pd.concat([df_mensal, new_line_df], ignore_index=True)
 
@@ -683,6 +687,7 @@ with tabs[2]:
                 st.success("Pagamento registrado com sucesso no Excel do SharePoint!!")
             except Exception as e:
                 st.error(f"Erro ao lançar pagamento: {e}")
+
 ###############################################################################
 # ABA 4: VISUALIZAR LANÇAMENTOS
 ###############################################################################

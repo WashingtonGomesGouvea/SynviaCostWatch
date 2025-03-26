@@ -567,6 +567,29 @@ with tabs[0]:
 ###############################################################################
 with tabs[1]:
     st.title("Lista de Fornecedores")
+
+    # Link para Power BI
+    st.write("### Dashboard no Power BI")
+    st.markdown(
+        "[Clique aqui para visualizar o relatório Power BI](https://app.powerbi.com/reportEmbed?reportId=cf2f800d-cf4a-4cb7-b871-99e583f70aa8&autoAuth=true&ctid=fee1b506-24b6-444a-919e-83df9442dc5d)",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        """
+        <iframe title="Análise de Custos" width="1140" height="541.25"
+                src="https://app.powerbi.com/reportEmbed?reportId=cf2f800d-cf4a-4cb7-b871-99e583f70aa8&autoAuth=true&ctid=fee1b506-24b6-444a-919e-83df9442dc5d"
+                frameborder="0" allowFullScreen="true"></iframe>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Link para pasta com arquivos-fonte
+    st.write("### Pasta SharePoint com arquivos-fonte")
+    st.markdown(
+        "[Acesse aqui a pasta no SharePoint](https://synviagroup.sharepoint.com/:f:/r/sites/gestaodeprodutos/Documentos%20Compartilhados/Gest%C3%A3o%20financeira?csf=1&web=1&e=vHmqxV)",
+        unsafe_allow_html=True
+    )
+
     suppliers = list(st.session_state.suppliers_data.keys())
     if suppliers:
         df_combined = pd.DataFrame()

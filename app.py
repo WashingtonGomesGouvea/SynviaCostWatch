@@ -97,7 +97,7 @@ COLUNAS_CONTROLE_MENSAL = [
 MESES_ORDENADOS = [
     "JANEIRO",
     "FEVEREIRO",
-    "MARCO",
+    "MARÇO",
     "ABRIL",
     "MAIO",
     "JUNHO",
@@ -365,7 +365,8 @@ if "fornecedor_criado" not in st.session_state:
 tabs = st.tabs([
     "Gerenciar Fornecedores",
     "Lista de Fornecedores",
-    "Registrar Pagamentos"  # Nome da aba ajustado
+    "Registrar Pagamentos",
+    "Visualizar Lançamentos"  # Nova aba adicionada
 ])
 
 ###############################################################################
@@ -682,3 +683,85 @@ with tabs[2]:
                 st.success("Pagamento registrado com sucesso no Excel do SharePoint!!")
             except Exception as e:
                 st.error(f"Erro ao lançar pagamento: {e}")
+###############################################################################
+# ABA 4: VISUALIZAR LANÇAMENTOS
+###############################################################################
+with tabs[3]:
+    st.title("Visualizar Lançamentos")
+    st.write("Nesta seção, você pode visualizar e editar os lançamentos de pagamentos por ano e mês.")
+
+    # Carregar os dados de controle mensal
+    df_mensal = st.session_state["controle_mensal"].copy()
+
+    # Obter anos e meses disponíveis
+    anos_disponiveis = sorted(df_mensal["Ano"].unique())
+    meses_disponiveis = MESES_ORDENADOS
+
+    # Selecionar ano e mês
+    sel_ano = st.selectbox("Selecione o Ano", anos_disponiveis)
+    sel_mes = st.selectbox("Selecione o Mês", meses_disponiveis)
+
+    # Filtrar os dados com base no ano e mês selecionados
+    df_filtrado = df_mensal[
+        (df_mensal["Ano"] == sel_ano) &
+        (df_mensal["Mes"] == sel_mes)
+    ]
+
+    if df_filtrado.empty:
+        st.info("Não há lançamentos para o ano e mês selecionados.")
+    else:
+        # Definir as colunas a serem exibidas
+        colunas_exibir = [
+            "Fornecedor",
+            "ID - Pagamento",
+            "Categoria",
+            "Data Pagamento",
+            "Valor Estimado - Real",
+            "Valor Pago Convertido",
+            "Diferença",
+            "Status de Pagamento",
+            "Observações"
+        ]
+
+        # Configuração das colunas para o st.data_editor
+        column_config = {
+            "Fornecedor": st.column_config.Column(disabled=True),
+            "ID - Pagamento": st.column_config.Column(disabled=True),
+            "Categoria": st.column_config.Column(disabled=True),
+            "Data Pagamento": st.column_config.DateColumn("Data Pagamento", format="DD/MM/YYYY"),
+            "Valor Estimado - Real": st.column_config.NumberColumn("Valor Estimado (R$)", format="%.2f"),
+            "Valor Pago Convertido": st.column_config.NumberColumn("Valor Pago (R$)", format="%.2f"),
+            "Diferença": st.column_config.NumberColumn("Diferença (R$)", format="%.2f"),
+            "Status de Pagamento": st.column_config.SelectboxColumn("Status", options=STATUS_PAG_OPCOES),
+            "Observações": st.column_config.TextColumn("Observações")
+        }
+
+        # Exibir tabela editável
+        edited_df = st.data_editor(
+            df_filtrado[colunas_exibir],
+            column_config=column_config,
+            num_rows="dynamic",
+            key=f"editor_lancamentos_{sel_ano}_{sel_mes}"
+        )
+
+        # Botão para salvar edições
+        if st.button("Salvar Edições nos Lançamentos"):
+            # Identificar índices originais e editados
+            original_indices = df_filtrado.index
+            edited_indices = edited_df.index
+
+            # Identificar linhas removidas
+            removed_indices = original_indices.difference(edited_indices)
+
+            # Remover linhas excluídas do DataFrame original
+            if not removed_indices.empty:
+                st.session_state["controle_mensal"] = st.session_state["controle_mensal"].drop(removed_indices)
+
+            # Atualizar as linhas restantes com os valores editados
+            for idx in edited_indices:
+                for col in colunas_exibir:
+                    st.session_state["controle_mensal"].loc[idx, col] = edited_df.loc[idx, col]
+
+            # Salvar no SharePoint
+            save_controle_mensal()
+            st.success("Lançamentos atualizados com sucesso no Excel do SharePoint!")

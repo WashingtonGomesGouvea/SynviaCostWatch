@@ -679,6 +679,6 @@ with tabs[2]:
                 # Salva imediatamente no SharePoint
                 save_controle_mensal()
 
-                st.success("Pagamento registrado com sucesso no Excel do SharePoint!")
+                st.success("Pagamento registrado com sucesso no Excel do SharePoint!!")
             except Exception as e:
                 st.error(f"Erro ao lançar pagamento: {e}")

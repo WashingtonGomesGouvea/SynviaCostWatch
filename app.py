@@ -177,9 +177,8 @@ def generate_id_produto(descricao, categoria):
 ###############################################################################
 # 4) CARREGAR EXCEL DO SHAREPOINT
 ###############################################################################
-from office365.sharepoint.files.file import File
-
 def load_excel_from_sharepoint(file_url):
+    # Removido spinner aqui para evitar re-runs desnecessários
     ctx = ClientContext(SITE_URL).with_credentials(UserCredential(EMAIL_REMETENTE, SENHA_EMAIL))
     response = File.open_binary(ctx, file_url)
     excel_data = response.content
@@ -190,6 +189,7 @@ def load_excel_from_sharepoint(file_url):
 # 5) CÓDIGO PARA FORNECEDORES
 ###############################################################################
 def load_fornecedores():
+    # Evitar spinner dentro de função que roda ao iniciar a app
     try:
         all_sheets = load_excel_from_sharepoint(FILE_URL_FORNECEDORES)
         results = {}
@@ -212,6 +212,7 @@ def load_fornecedores():
                 df["Valor mensal"] = df["Valor mensal"].apply(parse_float_br)
             if "Valor do plano" in df.columns:
                 df["Valor do plano"] = df["Valor do plano"].apply(parse_float_br)
+        # Insert each DataFrame in the results dict
             results[sheet_name] = df
         return results
     except Exception as e:
@@ -220,26 +221,31 @@ def load_fornecedores():
 
 def save_fornecedores():
     try:
-        for sheet_name, df in st.session_state.suppliers_data.items():
-            if "CNPJ" in df.columns:
-                df["CNPJ"] = df["CNPJ"].astype(str)
-            if "Contato" in df.columns:
-                df["Contato"] = df["Contato"].astype(str)
-            if "Inicio do contrato" in df.columns:
-                df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
-            if "Termino do contrato" in df.columns:
-                df["Termino do contrato"] = df["Termino do contrato"].apply(_datetime_to_str)
-            if "Início do Pagamento" in df.columns:
-                df["Início do Pagamento"] = df["Início do Pagamento"].apply(_datetime_to_str)
-
-        output = BytesIO()
-        with pd.ExcelWriter(output) as writer:
+        with st.spinner("Salvando dados de fornecedores..."):
             for sheet_name, df in st.session_state.suppliers_data.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
+                if "CNPJ" in df.columns:
+                    df["CNPJ"] = df["CNPJ"].astype(str)
+                if "Contato" in df.columns:
+                    df["Contato"] = df["Contato"].astype(str)
+                if "Inicio do contrato" in df.columns:
+                    df["Inicio do contrato"] = df["Inicio do contrato"].apply(_datetime_to_str)
+                if "Termino do contrato" in df.columns:
+                    df["Termino do contrato"] = df["Termino do contrato"].apply(_datetime_to_str)
+                if "Início do Pagamento" in df.columns:
+                    df["Início do Pagamento"] = df["Início do Pagamento"].apply(_datetime_to_str)
 
-        ctx = ClientContext(SITE_URL).with_credentials(UserCredential(EMAIL_REMETENTE, SENHA_EMAIL))
-        File.save_binary(ctx, FILE_URL_FORNECEDORES, output.getvalue())
+            output = BytesIO()
+            with pd.ExcelWriter(output) as writer:
+                for sheet_name, df_to_write in st.session_state.suppliers_data.items():
+                    # Replace NaN with blank
+                    df_to_write = df_to_write.fillna("")
+                    df_to_write.to_excel(writer, sheet_name=sheet_name, index=False)
+
+            ctx = ClientContext(SITE_URL).with_credentials(UserCredential(EMAIL_REMETENTE, SENHA_EMAIL))
+            File.save_binary(ctx, FILE_URL_FORNECEDORES, output.getvalue())
+
         st.success("Dados de Fornecedores salvos com sucesso! Para visualizar, atualize a página ou acesse a aba 'Lista de Fornecedores'.")
+        st.info("Por favor, recarregue a página após concluir as alterações para garantir que todos os dados estejam atualizados.")
     except Exception as e:
         if "Locked" in str(e) or "423" in str(e):
             st.warning("Arquivo de Fornecedores bloqueado. Feche ou faça check-in antes de salvar.")
@@ -254,45 +260,51 @@ def load_controle_mensal():
     Lê os arquivos (2025, 2026), ignora 'MATRIZ' e abas fora de MESES_ORDENADOS.
     Concatena num único DataFrame.
     """
-    dfs = []
-    map_ano_arquivo = {
-        "2025": FILE_URL_MENSAL_2025,
-        "2026": FILE_URL_MENSAL_2026,
-    }
-    for ano, url_arq in map_ano_arquivo.items():
-        try:
-            sheets = load_excel_from_sharepoint(url_arq)
-            for sheet_name, df_mes in sheets.items():
-                sn = sheet_name.strip().upper()
-                if sn == "MATRIZ":
-                    continue
-                if sn not in MESES_ORDENADOS:
-                    continue
-                df_mes.columns = df_mes.columns.str.strip()
-                for col in COLUNAS_CONTROLE_MENSAL:
-                    if col not in df_mes.columns:
-                        df_mes[col] = ""
-                if "Data Envio" in df_mes.columns:
-                    df_mes["Data Envio"] = pd.to_datetime(df_mes["Data Envio"], errors="coerce", dayfirst=True)
-                if "Data Pagamento" in df_mes.columns:
-                    df_mes["Data Pagamento"] = pd.to_datetime(df_mes["Data Pagamento"], errors="coerce", dayfirst=True)
-                if "Valor Estimado - Real" in df_mes.columns:
-                    df_mes["Valor Estimado - Real"] = df_mes["Valor Estimado - Real"].astype(str).apply(parse_float_br)
-                if "Valor Pago Convertido" in df_mes.columns:
-                    df_mes["Valor Pago Convertido"] = df_mes["Valor Pago Convertido"].astype(str).apply(parse_float_br)
+    # Evitar spinner dentro de função que roda ao iniciar a app
+    try:
+        dfs = []
+        map_ano_arquivo = {
+            "2025": FILE_URL_MENSAL_2025,
+            "2026": FILE_URL_MENSAL_2026,
+        }
+        for ano, url_arq in map_ano_arquivo.items():
+            try:
+                sheets = load_excel_from_sharepoint(url_arq)
+                for sheet_name, df_mes in sheets.items():
+                    sn = sheet_name.strip().upper()
+                    if sn == "MATRIZ":
+                        continue
+                    if sn not in MESES_ORDENADOS:
+                        continue
+                    df_mes.columns = df_mes.columns.str.strip()
+                    for col in COLUNAS_CONTROLE_MENSAL:
+                        if col not in df_mes.columns:
+                            df_mes[col] = ""
+                    if "Data Envio" in df_mes.columns:
+                        df_mes["Data Envio"] = pd.to_datetime(df_mes["Data Envio"], errors="coerce", dayfirst=True)
+                    if "Data Pagamento" in df_mes.columns:
+                        df_mes["Data Pagamento"] = pd.to_datetime(df_mes["Data Pagamento"], errors="coerce", dayfirst=True)
+                    if "Valor Estimado - Real" in df_mes.columns:
+                        df_mes["Valor Estimado - Real"] = df_mes["Valor Estimado - Real"].astype(str).apply(parse_float_br)
+                    if "Valor Pago Convertido" in df_mes.columns:
+                        df_mes["Valor Pago Convertido"] = df_mes["Valor Pago Convertido"].astype(str).apply(parse_float_br)
 
-                df_mes["Ano"] = ano
-                df_mes["Mes"] = sn
-                dfs.append(df_mes)
-        except Exception as e:
-            st.warning(f"Erro ao carregar {url_arq} ({ano}): {e}")
+                    df_mes["Ano"] = ano
+                    df_mes["Mes"] = sn
+                    dfs.append(df_mes)
+            except Exception as e:
+                st.warning(f"Erro ao carregar {url_arq} ({ano}): {e}")
 
-    if len(dfs) == 0:
+        if len(dfs) == 0:
+            return pd.DataFrame(columns=COLUNAS_CONTROLE_MENSAL)
+        df_final = pd.concat(dfs, ignore_index=True)
+        df_final["Mes_Indice"] = df_final["Mes"].apply(lambda x: MESES_ORDENADOS.index(x) if x in MESES_ORDENADOS else 99)
+        df_final = df_final.sort_values(by=["Ano", "Mes_Indice"]).drop(columns=["Mes_Indice"])
+        return df_final
+
+    except Exception as e:
+        st.error(f"Erro ao carregar controle mensal: {e}")
         return pd.DataFrame(columns=COLUNAS_CONTROLE_MENSAL)
-    df_final = pd.concat(dfs, ignore_index=True)
-    df_final["Mes_Indice"] = df_final["Mes"].apply(lambda x: MESES_ORDENADOS.index(x) if x in MESES_ORDENADOS else 99)
-    df_final = df_final.sort_values(by=["Ano", "Mes_Indice"]).drop(columns=["Mes_Indice"])
-    return df_final
 
 def save_controle_mensal():
     """
@@ -304,47 +316,49 @@ def save_controle_mensal():
         st.warning("Não há pagamentos para salvar.")
         return
 
-    group = df.groupby(["Ano", "Mes"], as_index=False)
-    dict_ano_mes = {}
-    for (ano, mes), df_subset in group:
-        for col in COLUNAS_CONTROLE_MENSAL:
-            if col not in df_subset.columns:
-                df_subset[col] = ""
-        if "Data Envio" in df_subset.columns:
-            df_subset["Data Envio"] = df_subset["Data Envio"].apply(_datetime_to_str)
-        if "Data Pagamento" in df_subset.columns:
-            df_subset["Data Pagamento"] = df_subset["Data Pagamento"].apply(_datetime_to_str)
-        if ano not in dict_ano_mes:
-            dict_ano_mes[ano] = {}
-        dict_ano_mes[ano][mes] = df_subset
+    with st.spinner("Salvando registros de pagamentos..."):
+        group = df.groupby(["Ano", "Mes"], as_index=False)
+        dict_ano_mes = {}
+        for (ano, mes), df_subset in group:
+            for col in COLUNAS_CONTROLE_MENSAL:
+                if col not in df_subset.columns:
+                    df_subset[col] = ""
+            if "Data Envio" in df_subset.columns:
+                df_subset["Data Envio"] = df_subset["Data Envio"].apply(_datetime_to_str)
+            if "Data Pagamento" in df_subset.columns:
+                df_subset["Data Pagamento"] = df_subset["Data Pagamento"].apply(_datetime_to_str)
+            if ano not in dict_ano_mes:
+                dict_ano_mes[ano] = {}
+            dict_ano_mes[ano][mes] = df_subset
 
-    map_ano_arquivo = {
-        "2025": FILE_URL_MENSAL_2025,
-        "2026": FILE_URL_MENSAL_2026,
-    }
+        map_ano_arquivo = {
+            "2025": FILE_URL_MENSAL_2025,
+            "2026": FILE_URL_MENSAL_2026,
+        }
 
-    for ano, meses_dict in dict_ano_mes.items():
-        if ano not in map_ano_arquivo:
-            st.warning(f"Ano {ano} não mapeado. Ignorando.")
-            continue
+        for ano, meses_dict in dict_ano_mes.items():
+            if ano not in map_ano_arquivo:
+                st.warning(f"Ano {ano} não mapeado. Ignorando.")
+                continue
 
-        output = BytesIO()
-        with pd.ExcelWriter(output) as writer:
-            # Garante a ordem de Janeiro a Dezembro nas abas
-            for mes in MESES_ORDENADOS:
-                if mes in meses_dict:
-                    df_abames = meses_dict[mes]
-                    df_abames.to_excel(writer, sheet_name=mes, index=False)
+            output = BytesIO()
+            with pd.ExcelWriter(output) as writer:
+                # Garante a ordem de Janeiro a Dezembro nas abas
+                for mes in MESES_ORDENADOS:
+                    if mes in meses_dict:
+                        df_abames = meses_dict[mes].fillna("")
+                        df_abames.to_excel(writer, sheet_name=mes, index=False)
 
-        try:
-            ctx = ClientContext(SITE_URL).with_credentials(UserCredential(EMAIL_REMETENTE, SENHA_EMAIL))
-            File.save_binary(ctx, map_ano_arquivo[ano], output.getvalue())
-            st.success(f"Os pagamentos referentes a {ano} foram salvos com sucesso no Excel do SharePoint!")
-        except Exception as e:
-            if "Locked" in str(e) or "423" in str(e):
-                st.warning("Arquivo de Pagamentos bloqueado. Feche ou faça check-in antes de salvar.")
-            else:
-                st.error(f"Erro ao salvar pagamentos de {ano}: {e}")
+            try:
+                ctx = ClientContext(SITE_URL).with_credentials(UserCredential(EMAIL_REMETENTE, SENHA_EMAIL))
+                File.save_binary(ctx, map_ano_arquivo[ano], output.getvalue())
+                st.success(f"Os pagamentos referentes a {ano} foram salvos com sucesso no Excel do SharePoint!")
+                st.info("Por favor, recarregue a página depois de salvar para ver os dados atualizados.")
+            except Exception as e:
+                if "Locked" in str(e) or "423" in str(e):
+                    st.warning("Arquivo de Pagamentos bloqueado. Feche ou faça check-in antes de salvar.")
+                else:
+                    st.error(f"Erro ao salvar pagamentos de {ano}: {e}")
 
 ###############################################################################
 # 7) INICIALIZA ST.SESSION_STATE
@@ -361,17 +375,17 @@ if "fornecedor_criado" not in st.session_state:
 ###############################################################################
 # 8) CRIA AS ABAS NO STREAMLIT
 ###############################################################################
-tabs = st.tabs([
+tab_fornecedores, tab_lista, tab_registrar, tab_visualizar = st.tabs([
     "Gerenciar Fornecedores",
     "Lista de Fornecedores",
     "Registrar Pagamentos",
-    "Visualizar Lançamentos"  # Nova aba adicionada
+    "Visualizar Lançamentos"
 ])
 
 ###############################################################################
 # ABA 1: GERENCIAR FORNECEDORES
 ###############################################################################
-with tabs[0]:
+with tab_fornecedores:
     st.title("Gerenciar Fornecedores")
 
     suppliers = list(st.session_state.suppliers_data.keys())
@@ -418,30 +432,38 @@ with tabs[0]:
     elif selected_supplier == "Adicionar Novo Fornecedor" and not st.session_state.fornecedor_criado:
         st.subheader("Adicionar Novo Fornecedor")
 
+        # Tiramos o spinner aqui para não causar re-run ao preencher
         new_supplier_name = st.text_input("Nome do Fornecedor", value=st.session_state.supplier_name, key="novo_fornecedor_nome")
         if new_supplier_name != st.session_state.supplier_name:
             st.session_state.supplier_name = new_supplier_name
             st.session_state.auto_id_fornecedor = generate_id_fornecedor(new_supplier_name)
 
-        new_id_fornecedor = st.text_input("ID - Fornecedor (auto)",
-                                          value=st.session_state.get("auto_id_fornecedor", ""),
-                                          key="novo_fornecedor_id")
+        new_id_fornecedor = st.text_input(
+            "ID - Fornecedor (auto)",
+            value=st.session_state.get("auto_id_fornecedor", ""),
+            key="novo_fornecedor_id"
+        )
 
         new_cnpj = st.text_input("CNPJ", key="novo_fornecedor_cnpj")
         new_contato = st.text_input("Contato", key="novo_fornecedor_contato")
         new_centro_custo = st.text_input("Centro de custo", key="novo_fornecedor_custo")
 
-        new_descricao_produto = st.text_input("Descrição do Produto",
-                                              value=st.session_state.product_name,
-                                              key="novo_fornecedor_desc")
+        new_descricao_produto = st.text_input(
+            "Descrição do Produto",
+            value=st.session_state.product_name,
+            key="novo_fornecedor_desc"
+        )
         if new_descricao_produto != st.session_state.product_name:
             st.session_state.product_name = new_descricao_produto
 
         new_categoria_produto = st.selectbox("Categoria do Produto", category_options, key="novo_fornecedor_categoria")
         st.session_state.auto_id_produto = generate_id_produto(new_descricao_produto, new_categoria_produto)
-        new_id_produto = st.text_input("ID - Produto (auto)",
-                                       value=st.session_state.get("auto_id_produto", ""),
-                                       key="novo_produto_id")
+
+        new_id_produto = st.text_input(
+            "ID - Produto (auto)",
+            value=st.session_state.get("auto_id_produto", ""),
+            key="novo_produto_id"
+        )
 
         new_status = "ATIVO"
         localidades = ["PAULINIA", "AMBAS", "CAMPINAS"]
@@ -537,6 +559,9 @@ with tabs[0]:
             if "Termino do contrato" in df_original.columns:
                 df_original["Termino do contrato"] = df_original["Termino do contrato"].apply(_datetime_to_str)
 
+            # Fill NaNs so we don't see 'NaN' in the editor
+            df_original = df_original.fillna("")
+
             column_config = {c: st.column_config.Column(disabled=True) for c in GENERAL_COLUMNS}
             edited_df = st.data_editor(
                 df_original,
@@ -565,7 +590,7 @@ with tabs[0]:
 ###############################################################################
 # ABA 2: LISTA DE FORNECEDORES
 ###############################################################################
-with tabs[1]:
+with tab_lista:
     st.title("Lista de Fornecedores")
 
     # Link para Power BI
@@ -597,6 +622,9 @@ with tabs[1]:
             df_temp = st.session_state.suppliers_data[sup_name].copy()
             df_temp.insert(0, "Aba (Fornecedor)", sup_name)
             df_combined = pd.concat([df_combined, df_temp], ignore_index=True)
+
+        # Replace NaN with blank before displaying
+        df_combined = df_combined.fillna("")
         st.dataframe(df_combined)
     else:
         st.info("Não há fornecedores cadastrados.")
@@ -604,7 +632,7 @@ with tabs[1]:
 ###############################################################################
 # ABA 3: REGISTRAR PAGAMENTOS
 ###############################################################################
-with tabs[2]:
+with tab_registrar:
     st.title("Registrar Pagamentos")
     st.write("Nesta seção, você pode adicionar novos pagamentos e salvá-los diretamente no Excel do SharePoint.")
 
@@ -614,7 +642,7 @@ with tabs[2]:
     fornecedores_list = list(st.session_state.suppliers_data.keys())
     sel_fornecedor = st.selectbox("Selecione o Fornecedor", [""] + fornecedores_list)
 
-    # ID Fornecedoor (auto)
+    # ID Fornecedor (auto)
     id_fornecedor_label = ""
     if sel_fornecedor:
         df_temp_forn = st.session_state.suppliers_data[sel_fornecedor]
@@ -629,6 +657,7 @@ with tabs[2]:
         if "ID - Pagamento" in df_temp_forn.columns:
             vals = df_temp_forn["ID - Pagamento"].dropna().unique()
             list_id_pag = sorted([v for v in vals if v])
+
     chosen_id_pag = st.selectbox("ID - Pagamento Existente", ["(Novo)"] + list_id_pag)
     if chosen_id_pag == "(Novo)":
         typed_id_pag = st.text_input("Ou digite novo ID - Pagamento")
@@ -643,107 +672,164 @@ with tabs[2]:
             st.info("Nenhuma descrição encontrada para o ID selecionado.")
 
     sel_categoria = st.selectbox("Categoria do Produto/Serviço", category_options)
-    
+
     # Definir ano e mês do lançamento
     hoje = datetime.date.today()
     ano_padrao = str(hoje.year)
-    mes_padrao = MESES_ORDENADOS[hoje.month - 1] if 1 <= hoje.month <= 12 else "JANEIRO"
+    mes_padrao_index = (hoje.month - 1) if 1 <= hoje.month <= 12 else 0
     sel_ano = st.text_input("Ano", ano_padrao)
-    sel_mes = st.selectbox("Mês", MESES_ORDENADOS, index=(hoje.month - 1 if 1 <= hoje.month <= 12 else 0))
-    
-    # Se o ID já existir para este ano/mês, pré-carregar campos "Dia Vencimento" e "Valor Estimado - Real"
+    sel_mes = st.selectbox("Mês", MESES_ORDENADOS, index=mes_padrao_index)
+
+    # Se o ID já existir para este ano/mês, vamos pré-carregar campos
     default_dia_venc = ""
+    default_data_envio = ""
+    default_data_pagamento = ""
+    default_metodo = "CARTÃO"
+    default_status_pag = "PENDENTE"
+    default_planejado = "SIM"
+    default_moeda = "REAL"
     default_val_estimado = ""
+    default_val_pago = ""
+    default_dif = ""
+    default_obs = ""
+
+    df_existente = pd.DataFrame()
     if final_id_pag and final_id_pag != "" and chosen_id_pag != "(Novo)":
-        filtro = (df_mensal["ID - Pagamento"] == final_id_pag) & (df_mensal["Ano"] == sel_ano) & (df_mensal["Mes"] == sel_mes)
-        df_existente = df_mensal[filtro]
+        filtro_existente = (
+            (df_mensal["ID - Pagamento"] == final_id_pag)
+            & (df_mensal["Ano"] == sel_ano)
+            & (df_mensal["Mes"] == sel_mes)
+        )
+        df_existente = df_mensal[filtro_existente]
         if not df_existente.empty:
             registro_existente = df_existente.iloc[0]
             default_dia_venc = registro_existente.get("Dia Vencimento", "")
+            default_data_envio = _datetime_to_str(registro_existente.get("Data Envio", ""))
+            default_data_pagamento = _datetime_to_str(registro_existente.get("Data Pagamento", ""))
+            default_metodo = registro_existente.get("Metodo de Pagamento", "CARTÃO")
+            default_status_pag = registro_existente.get("Status de Pagamento", "PENDENTE")
+            default_planejado = registro_existente.get("Planejado", "SIM")
+            default_moeda = registro_existente.get("Moeda", "REAL")
             default_val_estimado = registro_existente.get("Valor Estimado - Real", "")
-    
-    # Para o campo "Dia Vencimento": converte para inteiro (sem decimais)
-    dia_venc_input = st.text_input("Dia Vencimento", value=str(default_dia_venc).rstrip(".0") if default_dia_venc != "" else "")
+            default_val_pago = registro_existente.get("Valor Pago Convertido", "")
+            default_dif = registro_existente.get("Diferença", "")
+            default_obs = registro_existente.get("Observações", "")
+
+    # Conversão do dia de vencimento
+    dia_venc_input = st.text_input("Dia Vencimento", value=str(default_dia_venc).rstrip(".0") if default_dia_venc else "")
     try:
         dia_vencimento = int(float(dia_venc_input)) if dia_venc_input.strip() != "" else ""
     except Exception:
         dia_vencimento = dia_venc_input
 
-    data_envio_str = st.text_input("Data Envio (DD/MM/AAAA)")
-    data_pagamento_str = st.text_input("Data Pagamento (DD/MM/AAAA)")
-    metodo_pagamento = st.selectbox("Método de Pagamento", ["CARTÃO", "BOLETO"])
-    status_pag = st.selectbox("Status de Pagamento", STATUS_PAG_OPCOES)
-    planejado = st.selectbox("Planejado", ["SIM", "NÃO"])
-    sel_moeda = st.selectbox("Moeda", MOEDAS_COMUNS)
+    data_envio_str = st.text_input("Data Envio (DD/MM/AAAA)", value=default_data_envio if default_data_envio else "")
+    data_pagamento_str = st.text_input("Data Pagamento (DD/MM/AAAA)", value=default_data_pagamento if default_data_pagamento else "")
+
+    # Index for the metodo_pagamento
+    metodo_index = 0 if default_metodo == "CARTÃO" else 1
+    metodo_pagamento = st.selectbox("Método de Pagamento", ["CARTÃO", "BOLETO"], index=metodo_index)
+
+    # Index for status_pag
+    status_index = 0 if default_status_pag == "PENDENTE" else 1
+    status_pag = st.selectbox("Status de Pagamento", STATUS_PAG_OPCOES, index=status_index)
+
+    # Index for planejado
+    plan_index = 0 if default_planejado == "SIM" else 1
+    planejado = st.selectbox("Planejado", ["SIM", "NÃO"], index=plan_index)
+
+    # Index for moeda
+    sel_moeda_idx = MOEDAS_COMUNS.index(default_moeda) if default_moeda in MOEDAS_COMUNS else 0
+    sel_moeda = st.selectbox("Moeda", MOEDAS_COMUNS, index=sel_moeda_idx)
+
     val_estimado_str = st.text_input("Valor Estimado (R$)", value=str(default_val_estimado) if default_val_estimado != "" else "")
-    val_pago_str = st.text_input("Valor Pago Convertido (R$)")
-    obs = st.text_input("Observações")
+    val_pago_str = st.text_input("Valor Pago Convertido (R$)", value=str(default_val_pago) if default_val_pago != "" else "")
+    obs = st.text_input("Observações", value=default_obs if default_obs else "")
+
+    # Se já existir, oferecemos escolha: "Criar novo pagamento (nova linha)" OU "Somar com existente"
+    merge_option = "Criar Novo Pagamento"
+    if not df_existente.empty:
+        merge_option = st.radio(
+            "O ID de pagamento já existe neste mês/ano. Deseja criar um novo lançamento ou somar com o existente?",
+            ("Criar Novo Pagamento", "Somar com Existente")
+        )
 
     if st.button("Salvar Pagamento Agora"):
-        if not sel_fornecedor:
-            st.error("Selecione o fornecedor.")
-        else:
-            try:
-                dt_env = parse_date_br(data_envio_str)
-                dt_pag = parse_date_br(data_pagamento_str)
-                val_est = parse_float_br(val_estimado_str) or 0.0
-                val_pag = parse_float_br(val_pago_str) or 0.0
-                dif = val_est - val_pag
+        # Aqui deixamos spinner para feedback ao enviar
+        with st.spinner("Processando registro de pagamento..."):
+            if not sel_fornecedor:
+                st.error("Selecione o fornecedor.")
+            else:
+                try:
+                    dt_env = parse_date_br(data_envio_str)
+                    dt_pag = parse_date_br(data_pagamento_str)
+                    val_est = parse_float_br(val_estimado_str) or 0.0
+                    val_pag = parse_float_br(val_pago_str) or 0.0
+                    dif_local = val_est - val_pag
 
-                new_row = {
-                    "Fornecedor": sel_fornecedor,
-                    "ID - Fornecedor": id_fornecedor_label,
-                    "ID - Pagamento": final_id_pag,
-                    "Categoria": sel_categoria,
-                    "Dia Vencimento": dia_vencimento,
-                    "Data Envio": dt_env,
-                    "Data Pagamento": dt_pag,
-                    "Metodo de Pagamento": metodo_pagamento,
-                    "Status de Pagamento": status_pag,
-                    "Planejado": planejado,
-                    "Moeda": sel_moeda,
-                    "Valor Estimado - Real": val_est,
-                    "Valor Pago Convertido": val_pag,
-                    "Diferença": dif,
-                    "Observações": obs,
-                    "Ano": sel_ano,
-                    "Mes": sel_mes,
-                }
+                    new_row = {
+                        "Fornecedor": sel_fornecedor,
+                        "ID - Fornecedor": id_fornecedor_label,
+                        "ID - Pagamento": final_id_pag,
+                        "Categoria": sel_categoria,
+                        "Dia Vencimento": dia_vencimento,
+                        "Data Envio": dt_env,
+                        "Data Pagamento": dt_pag,
+                        "Metodo de Pagamento": metodo_pagamento,
+                        "Status de Pagamento": status_pag,
+                        "Planejado": planejado,
+                        "Moeda": sel_moeda,
+                        "Valor Estimado - Real": val_est,
+                        "Valor Pago Convertido": val_pag,
+                        "Diferença": dif_local,
+                        "Observações": obs,
+                        "Ano": sel_ano,
+                        "Mes": sel_mes,
+                    }
 
-                # Se já existir registro para este ID, ano e mês, mantenha o valor estimado original e some apenas o valor pago
-                filtro_salvar = (df_mensal["ID - Pagamento"] == final_id_pag) & (df_mensal["Ano"] == sel_ano) & (df_mensal["Mes"] == sel_mes)
-                if not df_mensal[filtro_salvar].empty:
-                    linhas_existentes = df_mensal[filtro_salvar]
-                    valor_est_existente = linhas_existentes["Valor Estimado - Real"].iloc[0]
-                    total_val_pag = linhas_existentes["Valor Pago Convertido"].sum() + val_pag
-                    total_dif = valor_est_existente - total_val_pag
-                    df_mensal = df_mensal[~filtro_salvar]
-                    new_row["Valor Estimado - Real"] = valor_est_existente
-                    new_row["Valor Pago Convertido"] = total_val_pag
-                    new_row["Diferença"] = total_dif
-                    # Também atualiza o dia de vencimento, convertendo-o para inteiro
-                    new_row["Dia Vencimento"] = dia_vencimento
+                    filtro_salvar = (
+                        (df_mensal["ID - Pagamento"] == final_id_pag)
+                        & (df_mensal["Ano"] == sel_ano)
+                        & (df_mensal["Mes"] == sel_mes)
+                    )
+                    existe_linha = not df_mensal[filtro_salvar].empty
 
-                new_line_df = pd.DataFrame([new_row])
-                df_mensal = pd.concat([df_mensal, new_line_df], ignore_index=True)
+                    if existe_linha and merge_option == "Somar com Existente":
+                        # Se for somar com existente, mantém valor estimado original e soma valor pago
+                        linhas_existentes = df_mensal[filtro_salvar]
+                        valor_est_existente = linhas_existentes["Valor Estimado - Real"].iloc[0]
+                        soma_val_pago = linhas_existentes["Valor Pago Convertido"].sum() + val_pag
+                        nova_dif = valor_est_existente - soma_val_pago
 
-                if "Data Envio" in df_mensal.columns:
-                    df_mensal["Data Envio"] = pd.to_datetime(df_mensal["Data Envio"], errors="coerce")
-                if "Data Pagamento" in df_mensal.columns:
-                    df_mensal["Data Pagamento"] = pd.to_datetime(df_mensal["Data Pagamento"], errors="coerce")
+                        # Remove linha(s) antiga(s)
+                        df_mensal = df_mensal[~filtro_salvar]
 
-                st.session_state["controle_mensal"] = df_mensal
+                        # Atualiza new_row
+                        new_row["Valor Estimado - Real"] = valor_est_existente
+                        new_row["Valor Pago Convertido"] = soma_val_pago
+                        new_row["Diferença"] = nova_dif
+                        new_row["Dia Vencimento"] = dia_vencimento
 
-                save_controle_mensal()
+                    new_line_df = pd.DataFrame([new_row])
+                    df_mensal = pd.concat([df_mensal, new_line_df], ignore_index=True)
 
-                st.success("Pagamento registrado com sucesso no Excel do SharePoint!!")
-            except Exception as e:
-                st.error(f"Erro ao lançar pagamento: {e}")
+                    # Converter colunas de data
+                    if "Data Envio" in df_mensal.columns:
+                        df_mensal["Data Envio"] = pd.to_datetime(df_mensal["Data Envio"], errors="coerce")
+                    if "Data Pagamento" in df_mensal.columns:
+                        df_mensal["Data Pagamento"] = pd.to_datetime(df_mensal["Data Pagamento"], errors="coerce")
+
+                    st.session_state["controle_mensal"] = df_mensal
+
+                    save_controle_mensal()
+                    st.success("Pagamento registrado com sucesso no Excel do SharePoint!!")
+                    st.info("Por favor, recarregue a página para ver os lançamentos mais recentes.")
+                except Exception as e:
+                    st.error(f"Erro ao lançar pagamento: {e}")
 
 ###############################################################################
 # ABA 4: VISUALIZAR LANÇAMENTOS
 ###############################################################################
-with tabs[3]:
+with tab_visualizar:
     st.title("Visualizar Lançamentos")
     st.write("Nesta seção, você pode visualizar e editar os lançamentos de pagamentos por ano e mês.")
 
@@ -752,56 +838,64 @@ with tabs[3]:
     anos_disponiveis = sorted(df_mensal["Ano"].unique())
     meses_disponiveis = MESES_ORDENADOS
 
-    sel_ano = st.selectbox("Selecione o Ano", anos_disponiveis)
-    sel_mes = st.selectbox("Selecione o Mês", meses_disponiveis)
-
-    df_filtrado = df_mensal[
-        (df_mensal["Ano"] == sel_ano) &
-        (df_mensal["Mes"] == sel_mes)
-    ]
-
-    if df_filtrado.empty:
-        st.info("Não há lançamentos para o ano e mês selecionados.")
+    if not anos_disponiveis:
+        st.info("Não há registros de pagamentos disponíveis.")
     else:
-        colunas_exibir = [
-            "Fornecedor",
-            "ID - Pagamento",
-            "Categoria",
-            "Data Pagamento",
-            "Valor Estimado - Real",
-            "Valor Pago Convertido",
-            "Diferença",
-            "Status de Pagamento",
-            "Observações"
+        sel_ano = st.selectbox("Selecione o Ano", anos_disponiveis)
+        sel_mes = st.selectbox("Selecione o Mês", meses_disponiveis)
+
+        df_filtrado = df_mensal[
+            (df_mensal["Ano"] == sel_ano) &
+            (df_mensal["Mes"] == sel_mes)
         ]
 
-        column_config = {
-            "Fornecedor": st.column_config.Column(disabled=True),
-            "ID - Pagamento": st.column_config.Column(disabled=True),
-            "Categoria": st.column_config.Column(disabled=True),
-            "Data Pagamento": st.column_config.DateColumn("Data Pagamento", format="DD/MM/YYYY"),
-            "Valor Estimado - Real": st.column_config.NumberColumn("Valor Estimado (R$)", format="%.2f"),
-            "Valor Pago Convertido": st.column_config.NumberColumn("Valor Pago (R$)", format="%.2f"),
-            "Diferença": st.column_config.NumberColumn("Diferença (R$)", format="%.2f"),
-            "Status de Pagamento": st.column_config.SelectboxColumn("Status", options=STATUS_PAG_OPCOES),
-            "Observações": st.column_config.TextColumn("Observações")
-        }
+        if df_filtrado.empty:
+            st.info("Não há lançamentos para o ano e mês selecionados.")
+        else:
+            colunas_exibir = [
+                "Fornecedor",
+                "ID - Pagamento",
+                "Categoria",
+                "Data Pagamento",
+                "Valor Estimado - Real",
+                "Valor Pago Convertido",
+                "Diferença",
+                "Status de Pagamento",
+                "Observações"
+            ]
 
-        edited_df = st.data_editor(
-            df_filtrado[colunas_exibir],
-            column_config=column_config,
-            num_rows="dynamic",
-            key=f"editor_lancamentos_{sel_ano}_{sel_mes}"
-        )
+            # Replace NaN before showing in data_editor
+            df_filtrado = df_filtrado.fillna("")
 
-        if st.button("Salvar Edições nos Lançamentos"):
-            original_indices = df_filtrado.index
-            edited_indices = edited_df.index
-            removed_indices = original_indices.difference(edited_indices)
-            if not removed_indices.empty:
-                st.session_state["controle_mensal"] = st.session_state["controle_mensal"].drop(removed_indices)
-            for idx in edited_indices:
-                for col in colunas_exibir:
-                    st.session_state["controle_mensal"].loc[idx, col] = edited_df.loc[idx, col]
-            save_controle_mensal()
-            st.success("Lançamentos atualizados com sucesso no Excel do SharePoint!")
+            column_config = {
+                "Fornecedor": st.column_config.Column(disabled=True),
+                "ID - Pagamento": st.column_config.Column(disabled=True),
+                "Categoria": st.column_config.Column(disabled=True),
+                "Data Pagamento": st.column_config.DateColumn("Data Pagamento", format="DD/MM/YYYY"),
+                "Valor Estimado - Real": st.column_config.NumberColumn("Valor Estimado (R$)", format="%.2f"),
+                "Valor Pago Convertido": st.column_config.NumberColumn("Valor Pago (R$)", format="%.2f"),
+                "Diferença": st.column_config.NumberColumn("Diferença (R$)", format="%.2f"),
+                "Status de Pagamento": st.column_config.SelectboxColumn("Status", options=STATUS_PAG_OPCOES),
+                "Observações": st.column_config.TextColumn("Observações")
+            }
+
+            edited_df = st.data_editor(
+                df_filtrado[colunas_exibir],
+                column_config=column_config,
+                num_rows="dynamic",
+                key=f"editor_lancamentos_{sel_ano}_{sel_mes}"
+            )
+
+            if st.button("Salvar Edições nos Lançamentos"):
+                with st.spinner("Salvando edições nos lançamentos..."):
+                    original_indices = df_filtrado.index
+                    edited_indices = edited_df.index
+                    removed_indices = original_indices.difference(edited_indices)
+                    if not removed_indices.empty:
+                        st.session_state["controle_mensal"] = st.session_state["controle_mensal"].drop(removed_indices)
+                    for idx in edited_indices:
+                        for col in colunas_exibir:
+                            st.session_state["controle_mensal"].loc[idx, col] = edited_df.loc[idx, col]
+                    save_controle_mensal()
+                st.success("Lançamentos atualizados com sucesso no Excel do SharePoint!")
+                st.info("Por favor, recarregue a página para visualizar os lançamentos atualizados.")

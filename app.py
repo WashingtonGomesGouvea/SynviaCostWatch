@@ -212,7 +212,7 @@ def load_fornecedores():
                 df["Valor mensal"] = df["Valor mensal"].apply(parse_float_br)
             if "Valor do plano" in df.columns:
                 df["Valor do plano"] = df["Valor do plano"].apply(parse_float_br)
-        # Insert each DataFrame in the results dict
+            # Adiciona cada aba no dicionário final
             results[sheet_name] = df
         return results
     except Exception as e:
@@ -260,7 +260,6 @@ def load_controle_mensal():
     Lê os arquivos (2025, 2026), ignora 'MATRIZ' e abas fora de MESES_ORDENADOS.
     Concatena num único DataFrame.
     """
-    # Evitar spinner dentro de função que roda ao iniciar a app
     try:
         dfs = []
         map_ano_arquivo = {
@@ -309,7 +308,6 @@ def load_controle_mensal():
 def save_controle_mensal():
     """
     Salva st.session_state["controle_mensal"] particionado por (Ano, Mes).
-    Apenas mostra mensagem de sucesso para cada ano que for realmente salvo.
     """
     df = st.session_state["controle_mensal"].copy()
     if df.empty:
@@ -383,6 +381,21 @@ tab_fornecedores, tab_lista, tab_registrar, tab_visualizar = st.tabs([
 ])
 
 ###############################################################################
+# Função auxiliar para auto-calcular valor do plano no formulário de NOVO PRODUTO
+###############################################################################
+def _auto_calc_valor_plano_newproduct():
+    val_mensal = parse_float_br(st.session_state.get("prod_valor_mensal_str", ""))
+    try:
+        parc = int(st.session_state.get("prod_tempo_pagamento", "1"))
+    except ValueError:
+        parc = 1
+    if val_mensal is not None and parc > 0:
+        st.session_state["prod_valor_plano_str"] = f"{val_mensal * parc:.2f}"
+    else:
+        st.session_state["prod_valor_plano_str"] = ""
+
+
+###############################################################################
 # ABA 1: GERENCIAR FORNECEDORES
 ###############################################################################
 with tab_fornecedores:
@@ -394,6 +407,9 @@ with tab_fornecedores:
         ["Adicionar Novo Fornecedor"] + suppliers
     )
 
+    # --------------------------------------------------------------------------
+    # 1) Callback para recalcular valor do plano ao criar fornecedor
+    # --------------------------------------------------------------------------
     def _auto_calc_valor_plano():
         val_mensal = parse_float_br(st.session_state.get("new_valor_mensal_str", ""))
         try:
@@ -405,8 +421,16 @@ with tab_fornecedores:
         else:
             st.session_state["new_valor_plano_str"] = ""
 
-    # Inicia variáveis se não existem
+    # --------------------------------------------------------------------------
+    # 2) Inicializa variáveis de session_state, se não existirem
+    # --------------------------------------------------------------------------
     for var_key in ["new_valor_mensal_str", "new_tempo_pagamento", "new_valor_plano_str"]:
+        if var_key not in st.session_state:
+            st.session_state[var_key] = ""
+
+    # As variáveis do "novo produto" (para fornecedor já existente)
+    # Serão preenchidas por callback; veja abaixo
+    for var_key in ["prod_valor_mensal_str", "prod_tempo_pagamento", "prod_valor_plano_str"]:
         if var_key not in st.session_state:
             st.session_state[var_key] = ""
 
@@ -415,9 +439,13 @@ with tab_fornecedores:
     if "product_name" not in st.session_state:
         st.session_state.product_name = ""
 
+    # --------------------------------------------------------------------------
+    # 3) BLOCO: Adicionar novo fornecedor
+    # --------------------------------------------------------------------------
     if st.session_state.fornecedor_criado and selected_supplier == "Adicionar Novo Fornecedor":
         st.success("Fornecedor criado com sucesso! Atualize a página para visualizar ou acesse a aba 'Lista de Fornecedores'.")
         if st.button("Criar outro fornecedor", key="criar_outro_fornecedor"):
+            # Limpa os campos
             st.session_state.fornecedor_criado = False
             st.session_state["new_valor_mensal_str"] = ""
             st.session_state["new_tempo_pagamento"] = ""
@@ -539,19 +567,25 @@ with tab_fornecedores:
                 st.session_state.fornecedor_criado = True
 
     else:
-        # Edição de Fornecedor existente
+        # ----------------------------------------------------------------------
+        # 4) BLOCO: Edição de Fornecedor já existente
+        # ----------------------------------------------------------------------
         if selected_supplier in suppliers:
             st.subheader(f"Edição do Fornecedor: {selected_supplier}")
             df_original = st.session_state.suppliers_data[selected_supplier].copy()
+
+            # Se tiver ao menos 1 linha (1 produto), pegamos a info geral da primeira
             if not df_original.empty:
                 general_info = df_original.iloc[0][GENERAL_COLUMNS].to_dict()
             else:
                 general_info = {col: "" for col in GENERAL_COLUMNS}
 
+            # Exibir campos gerais (editáveis)
             for col in GENERAL_COLUMNS:
                 general_info[col] = st.text_input(col, value=general_info[col], key=f"{selected_supplier}_{col}")
 
-            st.subheader("Produtos/Serviços")
+            # Parte de edição/visualização de produtos no data_editor
+            st.subheader("Produtos/Serviços Existentes")
             st.caption("Para inserir ou excluir linhas, use o '+' ou a lixeira no st.data_editor.")
 
             if "Inicio do contrato" in df_original.columns:
@@ -559,7 +593,7 @@ with tab_fornecedores:
             if "Termino do contrato" in df_original.columns:
                 df_original["Termino do contrato"] = df_original["Termino do contrato"].apply(_datetime_to_str)
 
-            # Fill NaNs so we don't see 'NaN' in the editor
+            # Fill NaNs para não aparecer "NaN" na tabela
             df_original = df_original.fillna("")
 
             column_config = {c: st.column_config.Column(disabled=True) for c in GENERAL_COLUMNS}
@@ -570,12 +604,14 @@ with tab_fornecedores:
                 key=f"editor_{selected_supplier}"
             )
 
+            # Atualiza no DataFrame as edições feitas nas colunas gerais
             if not edited_df.empty:
                 for col in GENERAL_COLUMNS:
                     edited_df[col] = general_info[col]
 
             st.session_state.suppliers_data[selected_supplier] = edited_df
 
+            # Botões de salvar e excluir fornecedor
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("Salvar Edições de Fornecedor", key=f"salvar_{selected_supplier}"):
@@ -586,6 +622,145 @@ with tab_fornecedores:
                     save_fornecedores()
                     st.warning(f"Fornecedor '{selected_supplier}' excluído!")
                     st.stop()
+
+            # ------------------------------------------------------------------
+# 5) BLOCO: Adicionar Novo Produto (apenas campos específicos)
+# ------------------------------------------------------------------
+st.subheader("Adicionar Novo Produto a Este Fornecedor")
+st.info("Alguns dados (Fornecedor, ID - Fornecedor, CNPJ etc.) serão pré-carregados. Preencha apenas os campos específicos do produto.")
+
+# Definimos callbacks para recalcular valor plano e adicionar produto
+def _auto_calc_valor_plano_newproduct():
+    val_mensal = parse_float_br(st.session_state.get("prod_valor_mensal_str", ""))
+    try:
+        parc = int(st.session_state.get("prod_tempo_pagamento", "1"))
+    except ValueError:
+        parc = 1
+    if val_mensal is not None and parc > 0:
+        st.session_state["prod_valor_plano_str"] = f"{val_mensal * parc:.2f}"
+    else:
+        st.session_state["prod_valor_plano_str"] = ""
+
+def reset_new_product_fields():
+    st.session_state["prod_valor_mensal_str"] = ""
+    st.session_state["prod_tempo_pagamento"] = ""
+    st.session_state["prod_valor_plano_str"] = ""
+    st.session_state["auto_id_produto_novo"] = ""
+    st.session_state["prod_metodopag"] = "CARTÃO"  # valor default, se quiser
+
+def adicionar_produto_callback():
+    # Callback que efetivamente cria nova linha e salva
+    df_updated = st.session_state.suppliers_data[selected_supplier].copy()
+
+    # Lê os campos do formulário
+    val_mensal = parse_float_br(st.session_state["prod_valor_mensal_str"])
+    val_plano = parse_float_br(st.session_state["prod_valor_plano_str"])
+
+    new_prod_inicio = st.session_state.get("new_prod_inicio", "")
+    new_prod_termino = st.session_state.get("new_prod_termino", "")
+    new_prod_iniciopag = st.session_state.get("new_prod_iniciopag", "")
+    new_prod_desc = st.session_state.get("new_prod_desc", "")
+    new_prod_cat = st.session_state.get("new_prod_cat", "")
+    new_prod_localidade = st.session_state.get("new_prod_localidade", "PAULINIA")
+    new_prod_metodopag = st.session_state.get("prod_metodopag", "CARTÃO")
+    new_prod_formapag = st.session_state.get("new_prod_formapag", "A Prazo")
+    new_prod_orcado = st.session_state.get("new_prod_orcado", "Não")
+    new_prod_observ = st.session_state.get("new_prod_observ", "")
+    default_status = "ATIVO"
+
+    dt_inicio = parse_date_br(new_prod_inicio) or None
+    dt_termino = parse_date_br(new_prod_termino) or None
+    dt_inicio_pag = parse_date_br(new_prod_iniciopag) or None
+
+    tempo_contrato = 0
+    if dt_inicio and dt_termino:
+        meses = (dt_termino.year - dt_inicio.year) * 12 + (dt_termino.month - dt_inicio.month)
+        if dt_termino.day >= dt_inicio.day:
+            meses += 1
+        if meses < 0:
+            meses = 0
+        tempo_contrato = meses
+
+    # Gera um ID de produto
+    auto_id_prod = generate_id_produto(new_prod_desc, new_prod_cat)
+
+    # Se DF vazio, cria columns:
+    if df_updated.empty:
+        df_updated = pd.DataFrame(columns=ALL_COLUMNS)
+
+    # Copia info geral
+    new_prod_row = {}
+    for col in GENERAL_COLUMNS:
+        new_prod_row[col] = general_info[col]
+
+    # Ajusta colunas específicas do produto
+    new_prod_row["Nº do Serviço"] = ""
+    new_prod_row["Status"] = default_status
+    new_prod_row["Status de Pagamento"] = ""
+    new_prod_row["Tipo de pagamento"] = ""
+    new_prod_row["Dia de Pagamento"] = ""
+
+    new_prod_row["ID - Produto"] = auto_id_prod
+    new_prod_row["Categoria do Produto"] = new_prod_cat
+    new_prod_row["Descrição do Produto"] = new_prod_desc
+    new_prod_row["Localidade"] = new_prod_localidade
+    new_prod_row["Metodo de pagamento"] = new_prod_metodopag
+    new_prod_row["Forma de pagamento"] = new_prod_formapag
+    new_prod_row["Valor mensal"] = val_mensal
+    new_prod_row["Valor do plano"] = val_plano
+    new_prod_row["Tempo de pagamento"] = st.session_state["prod_tempo_pagamento"]
+    new_prod_row["Inicio do contrato"] = _datetime_to_str(dt_inicio)
+    new_prod_row["Termino do contrato"] = _datetime_to_str(dt_termino)
+    new_prod_row["Tempo do contrato"] = tempo_contrato
+    new_prod_row["Início do Pagamento"] = _datetime_to_str(dt_inicio_pag)
+    new_prod_row["Orçado"] = new_prod_orcado
+    new_prod_row["Observações"] = new_prod_observ
+
+    df_updated = pd.concat([df_updated, pd.DataFrame([new_prod_row])], ignore_index=True)
+    st.session_state.suppliers_data[selected_supplier] = df_updated
+
+    # Salva e limpa
+    save_fornecedores()
+    reset_new_product_fields()
+    st.success("Novo produto adicionado com sucesso!")
+
+# -----------------------------------------------
+# Formulário de criação do novo produto,
+# replicando a mesma ordem de campos do cadastro de fornecedor
+# -----------------------------------------------
+st.text_input("Descrição do Produto (Novo)", key="new_prod_desc")
+st.selectbox("Categoria do Produto (Novo)", category_options, key="new_prod_cat")
+
+# Localidade, depois Método de Pagamento, depois Forma de pagamento
+st.selectbox("Localidade (Novo)", ["PAULINIA", "AMBAS", "CAMPINAS"], key="new_prod_localidade")
+st.selectbox("Método de Pagamento (Novo)", ["BOLETO", "CARTÃO"], key="prod_metodopag")
+
+forma_options = ["A Prazo", "A Vista"]
+st.selectbox("Forma de pagamento (Novo)", forma_options, key="new_prod_formapag")
+if st.session_state["new_prod_formapag"] == "A Vista":
+    st.session_state["prod_tempo_pagamento"] = "1"
+
+st.text_input(
+    "Valor Mensal (R$) - Novo",
+    key="prod_valor_mensal_str",
+    on_change=_auto_calc_valor_plano_newproduct
+)
+st.text_input(
+    "Tempo de pagamento (Parcelas) - Novo",
+    key="prod_tempo_pagamento",
+    on_change=_auto_calc_valor_plano_newproduct
+)
+st.text_input("Valor do Plano (R$) - Autopreenchido", key="prod_valor_plano_str", disabled=True)
+
+st.text_input("Início do contrato (DD/MM/AAAA) - Novo", key="new_prod_inicio")
+st.text_input("Término do contrato (DD/MM/AAAA) - Novo", key="new_prod_termino")
+st.text_input("Início do Pagamento (DD/MM/AAAA) - Novo", key="new_prod_iniciopag")
+
+st.selectbox("Orçado (Novo)", ["Sim", "Não"], key="new_prod_orcado")
+st.text_input("Observações (Novo)", key="new_prod_observ")
+
+# Botão que dispara a callback
+st.button("Adicionar Produto ao Fornecedor", on_click=adicionar_produto_callback)
 
 ###############################################################################
 # ABA 2: LISTA DE FORNECEDORES
@@ -680,7 +855,7 @@ with tab_registrar:
     sel_ano = st.text_input("Ano", ano_padrao)
     sel_mes = st.selectbox("Mês", MESES_ORDENADOS, index=mes_padrao_index)
 
-    # Se o ID já existir para este ano/mês, vamos pré-carregar campos
+    # Pré-carregamos, caso exista linha para esse ID no mesmo ano/mês
     default_dia_venc = ""
     default_data_envio = ""
     default_data_pagamento = ""
@@ -754,7 +929,6 @@ with tab_registrar:
         )
 
     if st.button("Salvar Pagamento Agora"):
-        # Aqui deixamos spinner para feedback ao enviar
         with st.spinner("Processando registro de pagamento..."):
             if not sel_fornecedor:
                 st.error("Selecione o fornecedor.")
@@ -864,7 +1038,6 @@ with tab_visualizar:
                 "Observações"
             ]
 
-            # Replace NaN before showing in data_editor
             df_filtrado = df_filtrado.fillna("")
 
             column_config = {

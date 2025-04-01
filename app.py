@@ -394,6 +394,16 @@ def _auto_calc_valor_plano_newproduct():
     else:
         st.session_state["prod_valor_plano_str"] = ""
 
+###############################################################################
+# Função para atualizar o ID - Produto (auto) no formulário de novo produto
+###############################################################################
+def update_auto_id_produto_novo():
+    desc = st.session_state.get("new_prod_desc", "")
+    cat = st.session_state.get("new_prod_cat", "")
+    if desc and cat:
+        st.session_state["auto_id_produto_novo"] = generate_id_produto(desc, cat)
+    else:
+        st.session_state["auto_id_produto_novo"] = ""
 
 ###############################################################################
 # ABA 1: GERENCIAR FORNECEDORES
@@ -623,145 +633,128 @@ with tab_fornecedores:
                     st.warning(f"Fornecedor '{selected_supplier}' excluído!")
                     st.stop()
 
-            # ------------------------------------------------------------------
-# 5) BLOCO: Adicionar Novo Produto (apenas campos específicos)
-# ------------------------------------------------------------------
-st.subheader("Adicionar Novo Produto a Este Fornecedor")
-st.info("Alguns dados (Fornecedor, ID - Fornecedor, CNPJ etc.) serão pré-carregados. Preencha apenas os campos específicos do produto.")
+   # --------------------------------------------------------------------------
+# BLOCO: Adicionar Novo Produto a Este Fornecedor (apenas para fornecedor existente)
+# --------------------------------------------------------------------------
+if selected_supplier and selected_supplier != "Adicionar Novo Fornecedor":
+    st.subheader("Adicionar Novo Produto a Este Fornecedor")
+    st.info("Alguns dados (Fornecedor, ID - Fornecedor, CNPJ etc.) serão pré-carregados. Preencha apenas os campos específicos do produto.")
 
-# Definimos callbacks para recalcular valor plano e adicionar produto
-def _auto_calc_valor_plano_newproduct():
-    val_mensal = parse_float_br(st.session_state.get("prod_valor_mensal_str", ""))
-    try:
-        parc = int(st.session_state.get("prod_tempo_pagamento", "1"))
-    except ValueError:
-        parc = 1
-    if val_mensal is not None and parc > 0:
-        st.session_state["prod_valor_plano_str"] = f"{val_mensal * parc:.2f}"
-    else:
+    # Novo formulário de produto – com campo de ID - Produto (auto)
+    new_prod_desc = st.text_input("Descrição do Produto (Novo)", key="new_prod_desc", on_change=update_auto_id_produto_novo)
+    new_prod_cat = st.selectbox("Categoria do Produto (Novo)", category_options, key="new_prod_cat", on_change=update_auto_id_produto_novo)
+    # Campo auto-gerado para ID - Produto
+    new_prod_id = st.text_input("ID - Produto (auto)", value=st.session_state.get("auto_id_produto_novo", ""), key="new_prod_id_produto_auto", disabled=True)
+
+    # NOVO: Campo para ID - Pagamento (Novo)
+    new_prod_id_pag = st.text_input("ID - Pagamento (Novo)", key="new_prod_id_pag")
+
+    # Localidade, Método de Pagamento, Forma de pagamento
+    st.selectbox("Localidade (Novo)", ["PAULINIA", "AMBAS", "CAMPINAS"], key="new_prod_localidade")
+    st.selectbox("Método de Pagamento (Novo)", ["BOLETO", "CARTÃO"], key="prod_metodopag")
+    forma_options = ["A Prazo", "A Vista"]
+    st.selectbox("Forma de pagamento (Novo)", forma_options, key="new_prod_formapag")
+    if st.session_state.get("new_prod_formapag") == "A Vista":
+        st.session_state["prod_tempo_pagamento"] = "1"
+
+    st.text_input("Valor Mensal (R$) - Novo", key="prod_valor_mensal_str", on_change=_auto_calc_valor_plano_newproduct)
+    st.text_input("Tempo de pagamento (Parcelas) - Novo", key="prod_tempo_pagamento", on_change=_auto_calc_valor_plano_newproduct)
+    st.text_input("Valor do Plano (R$) - Autopreenchido", key="prod_valor_plano_str", disabled=True)
+
+    st.text_input("Início do contrato (DD/MM/AAAA) - Novo", key="new_prod_inicio")
+    st.text_input("Término do contrato (DD/MM/AAAA) - Novo", key="new_prod_termino")
+    st.text_input("Início do Pagamento (DD/MM/AAAA) - Novo", key="new_prod_iniciopag")
+
+    st.selectbox("Orçado (Novo)", ["Sim", "Não"], key="new_prod_orcado")
+    st.text_input("Observações (Novo)", key="new_prod_observ")
+
+    # Botão que dispara a callback para adicionar o novo produto
+    st.button("Adicionar Produto ao Fornecedor", on_click=lambda: adicionar_produto_callback())
+
+    # Callback para adicionar produto
+    def adicionar_produto_callback():
+        # Callback que efetivamente cria nova linha e salva
+        df_updated = st.session_state.suppliers_data[selected_supplier].copy()
+
+        # Lê os campos do formulário
+        val_mensal = parse_float_br(st.session_state["prod_valor_mensal_str"])
+        val_plano = parse_float_br(st.session_state["prod_valor_plano_str"])
+
+        new_prod_inicio = st.session_state.get("new_prod_inicio", "")
+        new_prod_termino = st.session_state.get("new_prod_termino", "")
+        new_prod_iniciopag = st.session_state.get("new_prod_iniciopag", "")
+        new_prod_desc = st.session_state.get("new_prod_desc", "")
+        new_prod_cat = st.session_state.get("new_prod_cat", "")
+        new_prod_localidade = st.session_state.get("new_prod_localidade", "PAULINIA")
+        new_prod_metodopag = st.session_state.get("prod_metodopag", "CARTÃO")
+        new_prod_formapag = st.session_state.get("new_prod_formapag", "A Prazo")
+        new_prod_orcado = st.session_state.get("new_prod_orcado", "Não")
+        new_prod_observ = st.session_state.get("new_prod_observ", "")
+        # NOVO: Lê o campo novo ID - Pagamento
+        new_prod_id_pag = st.session_state.get("new_prod_id_pag", "")
+        default_status = "ATIVO"
+
+        dt_inicio = parse_date_br(new_prod_inicio) or None
+        dt_termino = parse_date_br(new_prod_termino) or None
+        dt_inicio_pag = parse_date_br(new_prod_iniciopag) or None
+
+        tempo_contrato = 0
+        if dt_inicio and dt_termino:
+            meses = (dt_termino.year - dt_inicio.year) * 12 + (dt_termino.month - dt_inicio.month)
+            if dt_termino.day >= dt_inicio.day:
+                meses += 1
+            if meses < 0:
+                meses = 0
+            tempo_contrato = meses
+
+        # Gera um ID de produto
+        auto_id_prod = generate_id_produto(new_prod_desc, new_prod_cat)
+
+        # Se DF vazio, cria columns:
+        if df_updated.empty:
+            df_updated = pd.DataFrame(columns=ALL_COLUMNS)
+
+        # Copia info geral
+        new_prod_row = {}
+        for col in GENERAL_COLUMNS:
+            new_prod_row[col] = general_info[col]
+
+        # Ajusta colunas específicas do produto
+        new_prod_row["Nº do Serviço"] = ""
+        new_prod_row["Status"] = default_status
+        new_prod_row["Status de Pagamento"] = ""
+        new_prod_row["Tipo de pagamento"] = ""
+        new_prod_row["Dia de Pagamento"] = ""
+
+        new_prod_row["ID - Produto"] = auto_id_prod
+        new_prod_row["Categoria do Produto"] = new_prod_cat
+        new_prod_row["Descrição do Produto"] = new_prod_desc
+        new_prod_row["Localidade"] = new_prod_localidade
+        new_prod_row["Metodo de pagamento"] = new_prod_metodopag
+        new_prod_row["Forma de pagamento"] = new_prod_formapag
+        new_prod_row["Valor mensal"] = val_mensal
+        new_prod_row["Valor do plano"] = val_plano
+        new_prod_row["Tempo de pagamento"] = st.session_state["prod_tempo_pagamento"]
+        new_prod_row["Inicio do contrato"] = _datetime_to_str(dt_inicio)
+        new_prod_row["Termino do contrato"] = _datetime_to_str(dt_termino)
+        new_prod_row["Tempo do contrato"] = tempo_contrato
+        new_prod_row["Início do Pagamento"] = _datetime_to_str(dt_inicio_pag)
+        new_prod_row["Orçado"] = new_prod_orcado
+        new_prod_row["Observações"] = new_prod_observ
+        # NOVO: Atribui o novo ID - Pagamento
+        new_prod_row["ID - Pagamento"] = new_prod_id_pag
+
+        df_updated = pd.concat([df_updated, pd.DataFrame([new_prod_row])], ignore_index=True)
+        st.session_state.suppliers_data[selected_supplier] = df_updated
+
+        # Salva e limpa
+        save_fornecedores()
+        st.session_state["prod_valor_mensal_str"] = ""
+        st.session_state["prod_tempo_pagamento"] = ""
         st.session_state["prod_valor_plano_str"] = ""
-
-def reset_new_product_fields():
-    st.session_state["prod_valor_mensal_str"] = ""
-    st.session_state["prod_tempo_pagamento"] = ""
-    st.session_state["prod_valor_plano_str"] = ""
-    st.session_state["auto_id_produto_novo"] = ""
-    st.session_state["prod_metodopag"] = "CARTÃO"  # valor default, se quiser
-
-def adicionar_produto_callback():
-    # Callback que efetivamente cria nova linha e salva
-    df_updated = st.session_state.suppliers_data[selected_supplier].copy()
-
-    # Lê os campos do formulário
-    val_mensal = parse_float_br(st.session_state["prod_valor_mensal_str"])
-    val_plano = parse_float_br(st.session_state["prod_valor_plano_str"])
-
-    new_prod_inicio = st.session_state.get("new_prod_inicio", "")
-    new_prod_termino = st.session_state.get("new_prod_termino", "")
-    new_prod_iniciopag = st.session_state.get("new_prod_iniciopag", "")
-    new_prod_desc = st.session_state.get("new_prod_desc", "")
-    new_prod_cat = st.session_state.get("new_prod_cat", "")
-    new_prod_localidade = st.session_state.get("new_prod_localidade", "PAULINIA")
-    new_prod_metodopag = st.session_state.get("prod_metodopag", "CARTÃO")
-    new_prod_formapag = st.session_state.get("new_prod_formapag", "A Prazo")
-    new_prod_orcado = st.session_state.get("new_prod_orcado", "Não")
-    new_prod_observ = st.session_state.get("new_prod_observ", "")
-    default_status = "ATIVO"
-
-    dt_inicio = parse_date_br(new_prod_inicio) or None
-    dt_termino = parse_date_br(new_prod_termino) or None
-    dt_inicio_pag = parse_date_br(new_prod_iniciopag) or None
-
-    tempo_contrato = 0
-    if dt_inicio and dt_termino:
-        meses = (dt_termino.year - dt_inicio.year) * 12 + (dt_termino.month - dt_inicio.month)
-        if dt_termino.day >= dt_inicio.day:
-            meses += 1
-        if meses < 0:
-            meses = 0
-        tempo_contrato = meses
-
-    # Gera um ID de produto
-    auto_id_prod = generate_id_produto(new_prod_desc, new_prod_cat)
-
-    # Se DF vazio, cria columns:
-    if df_updated.empty:
-        df_updated = pd.DataFrame(columns=ALL_COLUMNS)
-
-    # Copia info geral
-    new_prod_row = {}
-    for col in GENERAL_COLUMNS:
-        new_prod_row[col] = general_info[col]
-
-    # Ajusta colunas específicas do produto
-    new_prod_row["Nº do Serviço"] = ""
-    new_prod_row["Status"] = default_status
-    new_prod_row["Status de Pagamento"] = ""
-    new_prod_row["Tipo de pagamento"] = ""
-    new_prod_row["Dia de Pagamento"] = ""
-
-    new_prod_row["ID - Produto"] = auto_id_prod
-    new_prod_row["Categoria do Produto"] = new_prod_cat
-    new_prod_row["Descrição do Produto"] = new_prod_desc
-    new_prod_row["Localidade"] = new_prod_localidade
-    new_prod_row["Metodo de pagamento"] = new_prod_metodopag
-    new_prod_row["Forma de pagamento"] = new_prod_formapag
-    new_prod_row["Valor mensal"] = val_mensal
-    new_prod_row["Valor do plano"] = val_plano
-    new_prod_row["Tempo de pagamento"] = st.session_state["prod_tempo_pagamento"]
-    new_prod_row["Inicio do contrato"] = _datetime_to_str(dt_inicio)
-    new_prod_row["Termino do contrato"] = _datetime_to_str(dt_termino)
-    new_prod_row["Tempo do contrato"] = tempo_contrato
-    new_prod_row["Início do Pagamento"] = _datetime_to_str(dt_inicio_pag)
-    new_prod_row["Orçado"] = new_prod_orcado
-    new_prod_row["Observações"] = new_prod_observ
-
-    df_updated = pd.concat([df_updated, pd.DataFrame([new_prod_row])], ignore_index=True)
-    st.session_state.suppliers_data[selected_supplier] = df_updated
-
-    # Salva e limpa
-    save_fornecedores()
-    reset_new_product_fields()
-    st.success("Novo produto adicionado com sucesso!")
-
-# -----------------------------------------------
-# Formulário de criação do novo produto,
-# replicando a mesma ordem de campos do cadastro de fornecedor
-# -----------------------------------------------
-st.text_input("Descrição do Produto (Novo)", key="new_prod_desc")
-st.selectbox("Categoria do Produto (Novo)", category_options, key="new_prod_cat")
-
-# Localidade, depois Método de Pagamento, depois Forma de pagamento
-st.selectbox("Localidade (Novo)", ["PAULINIA", "AMBAS", "CAMPINAS"], key="new_prod_localidade")
-st.selectbox("Método de Pagamento (Novo)", ["BOLETO", "CARTÃO"], key="prod_metodopag")
-
-forma_options = ["A Prazo", "A Vista"]
-st.selectbox("Forma de pagamento (Novo)", forma_options, key="new_prod_formapag")
-if st.session_state["new_prod_formapag"] == "A Vista":
-    st.session_state["prod_tempo_pagamento"] = "1"
-
-st.text_input(
-    "Valor Mensal (R$) - Novo",
-    key="prod_valor_mensal_str",
-    on_change=_auto_calc_valor_plano_newproduct
-)
-st.text_input(
-    "Tempo de pagamento (Parcelas) - Novo",
-    key="prod_tempo_pagamento",
-    on_change=_auto_calc_valor_plano_newproduct
-)
-st.text_input("Valor do Plano (R$) - Autopreenchido", key="prod_valor_plano_str", disabled=True)
-
-st.text_input("Início do contrato (DD/MM/AAAA) - Novo", key="new_prod_inicio")
-st.text_input("Término do contrato (DD/MM/AAAA) - Novo", key="new_prod_termino")
-st.text_input("Início do Pagamento (DD/MM/AAAA) - Novo", key="new_prod_iniciopag")
-
-st.selectbox("Orçado (Novo)", ["Sim", "Não"], key="new_prod_orcado")
-st.text_input("Observações (Novo)", key="new_prod_observ")
-
-# Botão que dispara a callback
-st.button("Adicionar Produto ao Fornecedor", on_click=adicionar_produto_callback)
-
+        st.session_state["auto_id_produto_novo"] = ""
+        st.session_state["prod_metodopag"] = "CARTÃO"
+        st.success("Novo produto adicionado com sucesso!")
 ###############################################################################
 # ABA 2: LISTA DE FORNECEDORES
 ###############################################################################
